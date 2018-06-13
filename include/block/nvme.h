@@ -90,6 +90,11 @@ enum NvmeCcMask {
     CC_IOCQES_MASK  = 0xf,
 };
 
+#define NVME_CC_WR_MASK    (0x00fffff1)
+#define NVME_AQA_WR_MASK   (0x0fff0fff)
+#define NVME_ASQ_WR_MASK   (0xfffffffffffff000)
+#define NVME_ACQ_WR_MASK   (0xfffffffffffff000)
+
 #define NVME_CC_EN(cc)     ((cc >> CC_EN_SHIFT)     & CC_EN_MASK)
 #define NVME_CC_CSS(cc)    ((cc >> CC_CSS_SHIFT)    & CC_CSS_MASK)
 #define NVME_CC_MPS(cc)    ((cc >> CC_MPS_SHIFT)    & CC_MPS_MASK)

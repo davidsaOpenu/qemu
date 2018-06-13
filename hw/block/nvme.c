@@ -57,14 +57,24 @@ static void nvme_addr_read(NvmeCtrl *n, hwaddr addr, void *buf, int size)
     }
 }
 
-static int nvme_check_sqid(NvmeCtrl *n, uint16_t sqid)
+static int nvme_valid_sqid(NvmeCtrl *n, uint16_t sqid)
 {
-    return sqid < n->num_queues && n->sq[sqid] != NULL ? 0 : -1;
+    return sqid < n->num_queues;
 }
 
-static int nvme_check_cqid(NvmeCtrl *n, uint16_t cqid)
+static int nvme_used_sqid(NvmeCtrl *n, uint16_t sqid)
 {
-    return cqid < n->num_queues && n->cq[cqid] != NULL ? 0 : -1;
+    return sqid < n->num_queues && n->sq[sqid] != NULL ? 1 : 0;
+}
+
+static int nvme_valid_cqid(NvmeCtrl *n, uint16_t cqid)
+{
+    return cqid < n->num_queues;
+}
+
+static int nvme_used_cqid(NvmeCtrl *n, uint16_t cqid)
+{
+    return cqid < n->num_queues && n->cq[cqid] != NULL ? 1 : 0;
 }
 
 static void nvme_inc_cq_tail(NvmeCQueue *cq)
@@ -428,7 +438,7 @@ static uint16_t nvme_del_sq(NvmeCtrl *n, NvmeCmd *cmd)
     NvmeCQueue *cq;
     uint16_t qid = le16_to_cpu(c->qid);
 
-    if (unlikely(!qid || nvme_check_sqid(n, qid))) {
+    if (unlikely(!qid || !nvme_used_sqid(n, qid))) {
         trace_nvme_err_invalid_del_sq(qid);
         return NVME_INVALID_QID | NVME_DNR;
     }
@@ -441,7 +451,7 @@ static uint16_t nvme_del_sq(NvmeCtrl *n, NvmeCmd *cmd)
         assert(req->aiocb);
         blk_aio_cancel(req->aiocb);
     }
-    if (!nvme_check_cqid(n, sq->cqid)) {
+    if (nvme_used_cqid(n, sq->cqid)) {
         cq = n->cq[sq->cqid];
         QTAILQ_REMOVE(&cq->sq_list, sq, entry);
 
@@ -499,11 +509,11 @@ static uint16_t nvme_create_sq(NvmeCtrl *n, NvmeCmd *cmd)
 
     trace_nvme_create_sq(prp1, sqid, cqid, qsize, qflags);
 
-    if (unlikely(!cqid || nvme_check_cqid(n, cqid))) {
+    if (unlikely(!cqid || !nvme_used_cqid(n, cqid))) {
         trace_nvme_err_invalid_create_sq_cqid(cqid);
         return NVME_INVALID_CQID | NVME_DNR;
     }
-    if (unlikely(!sqid || !nvme_check_sqid(n, sqid))) {
+    if (unlikely(!sqid || !nvme_valid_sqid(n, sqid) || nvme_used_sqid(n, sqid))) {
         trace_nvme_err_invalid_create_sq_sqid(sqid);
         return NVME_INVALID_QID | NVME_DNR;
     }
@@ -541,9 +551,9 @@ static uint16_t nvme_del_cq(NvmeCtrl *n, NvmeCmd *cmd)
     NvmeCQueue *cq;
     uint16_t qid = le16_to_cpu(c->qid);
 
-    if (unlikely(!qid || nvme_check_cqid(n, qid))) {
+    if (unlikely(!qid || !nvme_used_cqid(n, qid))) {
         trace_nvme_err_invalid_del_cq_cqid(qid);
-        return NVME_INVALID_CQID | NVME_DNR;
+        return NVME_INVALID_QID | NVME_DNR;
     }
 
     cq = n->cq[qid];
@@ -587,9 +597,9 @@ static uint16_t nvme_create_cq(NvmeCtrl *n, NvmeCmd *cmd)
     trace_nvme_create_cq(prp1, cqid, vector, qsize, qflags,
                          NVME_CQ_FLAGS_IEN(qflags) != 0);
 
-    if (unlikely(!cqid || !nvme_check_cqid(n, cqid))) {
+    if (unlikely(!cqid || !nvme_valid_cqid(n, cqid) || nvme_used_cqid(n, cqid))) {
         trace_nvme_err_invalid_create_cq_cqid(cqid);
-        return NVME_INVALID_CQID | NVME_DNR;
+        return NVME_INVALID_QID | NVME_DNR;
     }
     if (unlikely(!qsize || qsize > NVME_CAP_MQES(n->bar.cap))) {
         trace_nvme_err_invalid_create_cq_size(qsize);
@@ -599,7 +609,7 @@ static uint16_t nvme_create_cq(NvmeCtrl *n, NvmeCmd *cmd)
         trace_nvme_err_invalid_create_cq_addr(prp1);
         return NVME_INVALID_FIELD | NVME_DNR;
     }
-    if (unlikely(vector > n->num_queues)) {
+    if (unlikely(vector >= n->num_queues)) {
         trace_nvme_err_invalid_create_cq_vector(vector);
         return NVME_INVALID_IRQ_VECTOR | NVME_DNR;
     }
@@ -1086,7 +1096,7 @@ static void nvme_process_db(NvmeCtrl *n, hwaddr addr, int val)
         NvmeCQueue *cq;
 
         qid = (addr - (0x1000 + (1 << 2))) >> 3;
-        if (unlikely(nvme_check_cqid(n, qid))) {
+        if (unlikely(!nvme_used_cqid(n, qid))) {
             NVME_GUEST_ERR(nvme_ub_db_wr_invalid_cq,
                            "completion queue doorbell write"
                            " for nonexistent queue,"
@@ -1124,7 +1134,7 @@ static void nvme_process_db(NvmeCtrl *n, hwaddr addr, int val)
         NvmeSQueue *sq;
 
         qid = (addr - 0x1000) >> 3;
-        if (unlikely(nvme_check_sqid(n, qid))) {
+        if (unlikely(!nvme_used_sqid(n, qid))) {
             NVME_GUEST_ERR(nvme_ub_db_wr_invalid_sq,
                            "submission queue doorbell write"
                            " for nonexistent queue,"

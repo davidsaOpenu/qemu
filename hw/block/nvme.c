@@ -800,7 +800,7 @@ static void nvme_process_sq(void *opaque)
     }
 }
 
-static void nvme_clear_ctrl(NvmeCtrl *n)
+static void nvme_clear_ctrl(NvmeCtrl *n, bool reset)
 {
     int i;
 
@@ -815,8 +815,18 @@ static void nvme_clear_ctrl(NvmeCtrl *n)
         }
     }
 
+    if (reset) {
+        // Reset clears all except for AWA, ASW, ACQ
+        n->bar.cc = 0;
+        n->bar.csts = 0;
+    }
+
+    // Update the IRQ status
+    n->bar.intmc = n->bar.intms = 0;
+    n->irq_status = 0;
+    nvme_irq_check(n);
+
     blk_flush(n->conf.blk);
-    n->bar.cc = 0;
 }
 
 static int nvme_start_ctrl(NvmeCtrl *n)
@@ -958,16 +968,14 @@ static void nvme_write_bar(NvmeCtrl *n, hwaddr offset, uint64_t data,
         nvme_irq_check(n);
         break;
     case 0x14:  /* CC */
-        trace_nvme_mmio_cfg(data & 0xffffffff);
-        /* Windows first sends data, then sends enable bit */
-        if (!NVME_CC_EN(data) && !NVME_CC_EN(n->bar.cc) &&
-            !NVME_CC_SHN(data) && !NVME_CC_SHN(n->bar.cc))
-        {
-            n->bar.cc = data;
-        }
+        trace_nvme_mmio_cfg(data & NVME_CC_WR_MASK);
 
-        if (NVME_CC_EN(data) && !NVME_CC_EN(n->bar.cc)) {
-            n->bar.cc = data;
+        uint32_t previous_cc = n->bar.cc;
+
+        // CC is all writeable
+        n->bar.cc = data & NVME_CC_WR_MASK;
+
+        if (NVME_CC_EN(data) && !NVME_CC_EN(previous_cc)) {
             if (unlikely(nvme_start_ctrl(n))) {
                 trace_nvme_err_startfail();
                 n->bar.csts = NVME_CSTS_FAILED;
@@ -975,21 +983,24 @@ static void nvme_write_bar(NvmeCtrl *n, hwaddr offset, uint64_t data,
                 trace_nvme_mmio_start_success();
                 n->bar.csts = NVME_CSTS_READY;
             }
-        } else if (!NVME_CC_EN(data) && NVME_CC_EN(n->bar.cc)) {
+
+        } else if (!NVME_CC_EN(data) && NVME_CC_EN(previous_cc)) {
             trace_nvme_mmio_stopped();
-            nvme_clear_ctrl(n);
-            n->bar.csts &= ~NVME_CSTS_READY;
+            nvme_clear_ctrl(n, true);
+
         }
-        if (NVME_CC_SHN(data) && !(NVME_CC_SHN(n->bar.cc))) {
+
+        if (NVME_CC_SHN(data) && !(NVME_CC_SHN(previous_cc))) {
             trace_nvme_mmio_shutdown_set();
-            nvme_clear_ctrl(n);
-            n->bar.cc = data;
+            nvme_clear_ctrl(n, false);
             n->bar.csts |= NVME_CSTS_SHST_COMPLETE;
-        } else if (!NVME_CC_SHN(data) && NVME_CC_SHN(n->bar.cc)) {
+
+        } else if (!NVME_CC_SHN(data) && NVME_CC_SHN(previous_cc)) {
             trace_nvme_mmio_shutdown_cleared();
             n->bar.csts &= ~NVME_CSTS_SHST_COMPLETE;
-            n->bar.cc = data;
+
         }
+
         break;
     case 0x1C:  /* CSTS */
         if (data & (1 << 4)) {
@@ -1011,23 +1022,23 @@ static void nvme_write_bar(NvmeCtrl *n, hwaddr offset, uint64_t data,
         }
         break;
     case 0x24:  /* AQA */
-        n->bar.aqa = data & 0xffffffff;
-        trace_nvme_mmio_aqattr(data & 0xffffffff);
+        n->bar.aqa = data & NVME_AQA_WR_MASK;
+        trace_nvme_mmio_aqattr(n->bar.aqa);
         break;
     case 0x28:  /* ASQ */
-        n->bar.asq = data;
-        trace_nvme_mmio_asqaddr(data);
+        n->bar.asq = data & NVME_ASQ_WR_MASK;
+        trace_nvme_mmio_asqaddr(n->bar.asq);
         break;
     case 0x2c:  /* ASQ hi */
-        n->bar.asq |= data << 32;
+        n->bar.asq |= (data << 32) & NVME_ASQ_WR_MASK;
         trace_nvme_mmio_asqaddr_hi(data, n->bar.asq);
         break;
     case 0x30:  /* ACQ */
-        trace_nvme_mmio_acqaddr(data);
-        n->bar.acq = data;
+        n->bar.acq = data & NVME_ACQ_WR_MASK;
+        trace_nvme_mmio_acqaddr(n->bar.acq);
         break;
     case 0x34:  /* ACQ hi */
-        n->bar.acq |= data << 32;
+        n->bar.acq |= (data << 32) & NVME_ACQ_WR_MASK;
         trace_nvme_mmio_acqaddr_hi(data, n->bar.acq);
         break;
     case 0x38:  /* CMBLOC */
@@ -1336,7 +1347,7 @@ static void nvme_exit(PCIDevice *pci_dev)
 {
     NvmeCtrl *n = NVME(pci_dev);
 
-    nvme_clear_ctrl(n);
+    nvme_clear_ctrl(n, true);
     g_free(n->namespaces);
     g_free(n->cq);
     g_free(n->sq);

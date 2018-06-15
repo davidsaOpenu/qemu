@@ -1151,8 +1151,12 @@ static void nvme_process_db(NvmeCtrl *n, hwaddr addr, int val)
             }
         }
 
+        // When we have more messages, we should make sure irq is asserted. When MSIx is used
+        // this will make sure another notification is sent to the guest.
         if (cq->tail == cq->head) {
             nvme_irq_deassert(n, cq);
+        } else {
+            nvme_irq_assert(n, cq);
         }
     } else {
         /* Submission queue doorbell write */

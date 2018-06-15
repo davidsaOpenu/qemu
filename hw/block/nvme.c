@@ -264,13 +264,14 @@ static void nvme_post_cqes(void *opaque)
     NvmeCtrl *n = cq->ctrl;
     NvmeRequest *req, *next;
 
+    // Fast path if nothing to be processed or guest CQ is full.
+    if (QTAILQ_EMPTY(&cq->req_list) || nvme_cq_full(cq)) {
+        return;
+    }
+
     QTAILQ_FOREACH_SAFE(req, &cq->req_list, entry, next) {
         NvmeSQueue *sq;
         hwaddr addr;
-
-        if (nvme_cq_full(cq)) {
-            break;
-        }
 
         QTAILQ_REMOVE(&cq->req_list, req, entry);
         sq = req->sq;
@@ -1129,14 +1130,21 @@ static void nvme_process_db(NvmeCtrl *n, hwaddr addr, int val)
             return;
         }
 
+        /*
+         CLARIFICATION
+         When CQ was full *before* the db write, nvme_post_cqes skipped processing of responses and
+         as a side effect SQ was unable to process new requests (As they are limited by size).
+         When CQ is cleared, spawn both processing of all CQs and SQs. As call to timer_mod
+         is serial, first handle the CQ to clear any pending requests and then clear the associated SQs.
+         */
         start_sqs = nvme_cq_full(cq) ? 1 : 0;
         cq->head = new_head;
         if (start_sqs) {
             NvmeSQueue *sq;
+            timer_mod(cq->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 500);
             QTAILQ_FOREACH(sq, &cq->sq_list, entry) {
                 timer_mod(sq->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 500);
             }
-            timer_mod(cq->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 500);
         }
 
         if (cq->tail == cq->head) {

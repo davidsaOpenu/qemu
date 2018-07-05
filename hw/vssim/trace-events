@@ -1,0 +1,5 @@
+vssim_open(void * dev) "VSSIM drive %p open"
+vssim_initialized(void * dev, uint64_t size, void * mem) "VSSIM drive %p initialized size=0x%"PRIx64" memory=%p"
+vssim_close(void * dev) "VSSIM drive %p close"
+vssim_read(void * dev, uint64_t offset, uint64_t bytes) "VSSIM drive %p read offset=0x%"PRIx64" bytes=0x%"PRIx64""
+vssim_write(void * dev, uint64_t offset, uint64_t bytes) "VSSIM drive %p write offset=0x%"PRIx64" bytes=0x%"PRIx64""

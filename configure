@@ -456,6 +456,7 @@ jemalloc="no"
 replication="yes"
 vxhs=""
 libxml2=""
+vssim="no"
 
 supported_cpu="no"
 supported_os="no"
@@ -1381,6 +1382,10 @@ for opt do
   ;;
   --disable-git-update) git_update=no
   ;;
+  --disable-vssim) vssim="no"
+  ;;
+  --enable-vssim) vssim="yes"
+  ;;
   *)
       echo "ERROR: unknown option $opt"
       echo "Try '$0 --help' for more information"
@@ -1554,6 +1559,8 @@ Advanced options (experts only):
                            xen pv domain builder
   --enable-debug-stack-usage
                            track the maximum stack usage of stacks created by qemu_alloc_stack
+  --disable-vssim          disable vssim support
+  --enable-vssim           enable vssim support
 
 Optional features, enabled with --enable-FEATURE and
 disabled with --disable-FEATURE, default is enabled if available:
@@ -1968,6 +1975,57 @@ if compile_object ; then
 else
     echo big/little test failed
 fi
+
+## VSSIM
+QEMU_CFLAGS="-D VSSIM_NEXTGEN_BUILD_SYSTEM $QEMU_CFLAGS"
+QEMU_INCLUDES="-I/opt/libwebsockets/include $QEMU_INCLUDES"
+LDFLAGS="-L/opt/libwebsockets/lib $LDFLAGS"
+LIBS="-lwebsockets $LIBS"
+
+# Configure optional vssim links
+if test "$vssim" = "yes" ; then
+    vssim_source="$source_path/../simulator/eVSSIM"
+    vssim_target="$source_path/hw/vssim/simulator"
+    symlink "$vssim_source/SSD_MODULE/ssd_io_manager.h" "$vssim_target/ssd_io_manager.h"
+    symlink "$vssim_source/SSD_MODULE/ssd_io_manager.c" "$vssim_target/ssd_io_manager.c"
+    symlink "$vssim_source/SSD_MODULE/ssd_log_manager.h" "$vssim_target/ssd_log_manager.h"
+    symlink "$vssim_source/SSD_MODULE/ssd_log_manager.c" "$vssim_target/ssd_log_manager.c"
+    symlink "$vssim_source/SSD_MODULE/ssd_util.h" "$vssim_target/ssd_util.h"
+    symlink "$vssim_source/FTL_SOURCE/COMMON/common.h" "$vssim_target/common.h"
+    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl.h" "$vssim_target/ftl.h"
+    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl.c" "$vssim_target/ftl.c"
+    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_sect_strategy.h" "$vssim_target/ftl_sect_strategy.h"
+    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_sect_strategy.c" "$vssim_target/ftl_sect_strategy.c"
+    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_obj_strategy.h" "$vssim_target/ftl_obj_strategy.h"
+    #symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_obj_strategy.c" "$vssim_target/ftl_obj_strategy.c"
+    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/TOOLS/uthash.h" "$vssim_target/uthash.h"
+    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_type.h" "$vssim_target/ftl_type.h"
+    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_gc_manager.h" "$vssim_target/ftl_gc_manager.h"
+    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_gc_manager.c" "$vssim_target/ftl_gc_manager.c"
+    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_inverse_mapping_manager.h" "$vssim_target/ftl_inverse_mapping_manager.h"
+    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_inverse_mapping_manager.c" "$vssim_target/ftl_inverse_mapping_manager.c"
+    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_mapping_manager.h" "$vssim_target/ftl_mapping_manager.h"
+    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_mapping_manager.c" "$vssim_target/ftl_mapping_manager.c"
+    symlink "$vssim_source/FTL_SOURCE/PERF_MODULE/ftl_perf_manager.h" "$vssim_target/ftl_perf_manager.h"
+    symlink "$vssim_source/FTL_SOURCE/PERF_MODULE/ftl_perf_manager.c" "$vssim_target/ftl_perf_manager.c"
+    symlink "$vssim_source/CONFIG/vssim_config_manager.c" "$vssim_target/vssim_config_manager.c"
+    symlink "$vssim_source/CONFIG/vssim_config_manager.h" "$vssim_target/vssim_config_manager.h"
+    symlink "$vssim_source/MONITOR/SSD_MONITOR_PM/ssd_monitor_p" "$vssim_target/ssd_monitor"
+    symlink "$vssim_source/LOG_MGR/logging_backend.c" "$vssim_target/logging_backend.c"
+    symlink "$vssim_source/LOG_MGR/logging_backend.h" "$vssim_target/logging_backend.h"
+    symlink "$vssim_source/LOG_MGR/logging_manager.c" "$vssim_target/logging_manager.c"
+    symlink "$vssim_source/LOG_MGR/logging_manager.h" "$vssim_target/logging_manager.h"
+    symlink "$vssim_source/LOG_MGR/logging_parser.c" "$vssim_target/logging_parser.c"
+    symlink "$vssim_source/LOG_MGR/logging_parser.h" "$vssim_target/logging_parser.h"
+    symlink "$vssim_source/LOG_MGR/logging_statistics.c" "$vssim_target/logging_statistics.c"
+    symlink "$vssim_source/LOG_MGR/logging_statistics.h" "$vssim_target/logging_statistics.h"
+    symlink "$vssim_source/LOG_MGR/logging_rt_analyzer.c" "$vssim_target/logging_rt_analyzer.c"
+    symlink "$vssim_source/LOG_MGR/logging_rt_analyzer.h" "$vssim_target/logging_rt_analyzer.h"
+    symlink "$vssim_source/MONITOR/SERVER/logging_server.c" "$vssim_target/logging_server.c"
+    symlink "$vssim_source/MONITOR/SERVER/logging_server.h" "$vssim_target/logging_server.h"
+    symlink "$vssim_source/MONITOR/SERVER/www" "$vssim_target/www"
+fi
+
 
 ##########################################
 # cocoa implies not SDL or GTK
@@ -5907,6 +5965,7 @@ echo "avx2 optimization $avx2_opt"
 echo "replication support $replication"
 echo "VxHS block device $vxhs"
 echo "capstone          $capstone"
+echo "VSSIM used        $vssim"
 
 if test "$sdl_too_old" = "yes"; then
 echo "-> Your SDL version is too old - please upgrade to have SDL support"
@@ -6393,6 +6452,10 @@ if test "$opengl" = "yes" ; then
   if test "$opengl_dmabuf" = "yes" ; then
     echo "CONFIG_OPENGL_DMABUF=y" >> $config_host_mak
   fi
+fi
+
+if test "$vssim" = "yes" ; then
+  echo "CONFIG_VSSIM=y" >> $config_host_mak
 fi
 
 if test "$malloc_trim" = "yes" ; then

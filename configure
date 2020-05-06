@@ -2024,6 +2024,9 @@ if test "$vssim" = "yes" ; then
     symlink "$vssim_source/MONITOR/SERVER/logging_server.c" "$vssim_target/logging_server.c"
     symlink "$vssim_source/MONITOR/SERVER/logging_server.h" "$vssim_target/logging_server.h"
     symlink "$vssim_source/MONITOR/SERVER/www" "$vssim_target/www"
+    symlink "$vssim_source/LOG_MGR/logging_offline_analyzer.h" "$vssim_target/logging_offline_analyzer.h"
+    symlink "$vssim_source/LOG_MGR/logging_offline_analyzer.c" "$vssim_target/logging_offline_analyzer.c"
+
 fi
 
 

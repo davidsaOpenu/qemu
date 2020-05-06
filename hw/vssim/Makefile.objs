@@ -10,3 +10,4 @@ common-obj-$(CONFIG_VSSIM) += simulator/ssd_io_manager.o
 common-obj-$(CONFIG_VSSIM) += simulator/ssd_log_manager.o
 common-obj-$(CONFIG_VSSIM) += simulator/logging_backend.o simulator/logging_manager.o simulator/logging_parser.o simulator/logging_rt_analyzer.o
 common-obj-$(CONFIG_VSSIM) += simulator/logging_server.o simulator/logging_statistics.o
+common-obj-$(CONFIG_VSSIM) += simulator/logging_offline_analyzer.o

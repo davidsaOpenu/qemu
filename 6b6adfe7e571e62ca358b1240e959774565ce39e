@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "2a5078a9_ba724622",
+        "filename": "/COMMIT_MSG",
+        "patchSetId": 1
+      },
+      "lineNbr": 8,
+      "author": {
+        "id": 1007990
+      },
+      "writtenOn": "2020-07-03T06:59:59Z",
+      "side": 1,
+      "message": "Please describe a problem this patch targets to solve.",
+      "revId": "6b6adfe7e571e62ca358b1240e959774565ce39e",
+      "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735",
+      "unresolved": true
+    }
+  ]
+}

@@ -2013,6 +2013,8 @@ if test "$vssim" = "yes" ; then
     symlink "$vssim_source/MONITOR/SSD_MONITOR_PM/ssd_monitor_p" "$vssim_target/ssd_monitor"
     symlink "$vssim_source/LOG_MGR/logging_backend.c" "$vssim_target/logging_backend.c"
     symlink "$vssim_source/LOG_MGR/logging_backend.h" "$vssim_target/logging_backend.h"
+    symlink "$vssim_source/LOG_MGR/logging_writer.c" "$vssim_target/logging_writer.c"
+    symlink "$vssim_source/LOG_MGR/logging_writer.h" "$vssim_target/logging_writer.h"
     symlink "$vssim_source/LOG_MGR/logging_manager.c" "$vssim_target/logging_manager.c"
     symlink "$vssim_source/LOG_MGR/logging_manager.h" "$vssim_target/logging_manager.h"
     symlink "$vssim_source/LOG_MGR/logging_parser.c" "$vssim_target/logging_parser.c"

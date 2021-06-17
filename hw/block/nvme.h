@@ -52,6 +52,8 @@ typedef struct NvmeCQueue {
 
 typedef struct NvmeNamespace {
     NvmeIdNs        id_ns;
+    void            *mptr;
+    uint16_t        ms;
 } NvmeNamespace;
 
 #define TYPE_NVME "nvme"

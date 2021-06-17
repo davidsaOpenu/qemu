@@ -47,6 +47,8 @@ void qemu_sglist_init(QEMUSGList *qsg, DeviceState *dev, int alloc_hint,
     qsg->as = as;
     qsg->dev = dev;
     object_ref(OBJECT(dev));
+    qsg->metadata = NULL;
+    qsg->metadata_len = 0;
 }
 
 void qemu_sglist_add(QEMUSGList *qsg, dma_addr_t base, dma_addr_t len)
@@ -61,10 +63,34 @@ void qemu_sglist_add(QEMUSGList *qsg, dma_addr_t base, dma_addr_t len)
     ++qsg->nsg;
 }
 
+size_t qemu_sglist_get_metadata(QEMUSGList *qsg, void *buf, size_t bytes)
+{
+    if (!qsg->metadata_len)
+        return 0;
+    size_t size = bytes < qsg->metadata_len ? bytes : qsg->metadata_len;
+    memcpy(buf, qsg->metadata, size);
+    return size;
+}
+
+size_t qemu_sglist_set_metadata(QEMUSGList *qsg, void *buf, size_t bytes)
+{
+    if (!bytes)
+        return 0;
+    //if(qsg->metadata)
+    //    g_free(qsg->metadata);
+    qsg->metadata = g_malloc(bytes);
+    memcpy(qsg->metadata, buf, bytes);
+    return qsg->metadata_len = bytes;
+}
+
 void qemu_sglist_destroy(QEMUSGList *qsg)
 {
     object_unref(OBJECT(qsg->dev));
     g_free(qsg->sg);
+    if (qsg->metadata)
+        g_free(qsg->metadata);
+    qsg->metadata = NULL;
+    qsg->metadata_len = 0;
     memset(qsg, 0, sizeof(*qsg));
 }
 
@@ -224,6 +250,7 @@ BlockAIOCB *dma_blk_io(AioContext *ctx,
     dbs->io_func_opaque = io_func_opaque;
     dbs->bh = NULL;
     qemu_iovec_init(&dbs->iov, sg->nsg);
+    qemu_iovec_set_metadata(&dbs->iov, sg->metadata, sg->metadata_len); /* temporary fix to pass metadata to vssim.c */
     dma_blk_cb(dbs, 0);
     return &dbs->common;
 }

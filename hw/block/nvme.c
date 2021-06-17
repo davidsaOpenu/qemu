@@ -362,11 +362,14 @@ static uint16_t nvme_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     uint64_t slba = le64_to_cpu(rw->slba);
     uint64_t prp1 = le64_to_cpu(rw->prp1);
     uint64_t prp2 = le64_to_cpu(rw->prp2);
+    uint64_t mptr = le64_to_cpu(rw->mptr); 
 
     uint8_t lba_index  = NVME_ID_NS_FLBAS_INDEX(ns->id_ns.flbas);
     uint8_t data_shift = ns->id_ns.lbaf[lba_index].ds;
     uint64_t data_size = (uint64_t)nlb << data_shift;
+    uint16_t metadata_size = ns->id_ns.lbaf[lba_index].ms;
     uint64_t data_offset = slba << data_shift;
+    uint8_t *metadata_buf = NULL;
     int is_write = rw->opcode == NVME_CMD_WRITE ? 1 : 0;
     enum BlockAcctType acct = is_write ? BLOCK_ACCT_WRITE : BLOCK_ACCT_READ;
 
@@ -381,6 +384,19 @@ static uint16_t nvme_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     if (nvme_map_prp(&req->qsg, &req->iov, prp1, prp2, data_size, n)) {
         block_acct_invalid(blk_get_stats(n->conf.blk), acct);
         return NVME_INVALID_FIELD | NVME_DNR;
+    }
+
+    if (metadata_size){
+        /* Temporary fix until we move io parsing to vssim.c */
+        metadata_buf = g_malloc(metadata_size); /* We don't need more than 1 block for the object */
+        cpu_physical_memory_rw(mptr, metadata_buf, metadata_size, 0); /* read metadata from dma */
+        qemu_iovec_set_metadata(&req->iov, metadata_buf, metadata_size); /* set metadata buffer in QEMUIOVector */
+        qemu_sglist_set_metadata(&req->qsg, metadata_buf, metadata_size); /* set metadata buffer in sg structure */
+        g_free(metadata_buf);
+
+        /* A way around the current standard requirements, as we don't really need to save the metadata */
+        ns->ms = nlb;
+        cpu_physical_memory_rw(mptr, ns->mptr, metadata_size * ns->ms, !is_write);
     }
 
     dma_acct_start(n->conf.blk, &req->acct, &req->qsg, acct);
@@ -1251,7 +1267,7 @@ static uint32_t nvme_pci_read_config(PCIDevice *pci_dev, uint32_t addr, int len)
 static void nvme_realize(PCIDevice *pci_dev, Error **errp)
 {
     static const uint16_t nvme_pm_offset = 0x80;
-    static const uint16_t nvme_pcie_offset = nvme_pm_offset + PCI_PM_SIZEOF;
+    static const uint16_t nvme_pcie_offset = 0x80 + PCI_PM_SIZEOF;
 
     NvmeCtrl *n = NVME(pci_dev);
     NvmeIdCtrl *id = &n->id_ctrl;
@@ -1400,12 +1416,14 @@ static void nvme_realize(PCIDevice *pci_dev, Error **errp)
     for (i = 0; i < n->num_namespaces; i++) {
         NvmeNamespace *ns = &n->namespaces[i];
         NvmeIdNs *id_ns = &ns->id_ns;
+        ns->mptr = g_malloc0((1024*1024*1024));
         id_ns->nsfeat = 0;
         id_ns->nlbaf = 0;
         id_ns->flbas = 0;
         id_ns->mc = 0;
         id_ns->dpc = 0;
         id_ns->dps = 0;
+        id_ns->lbaf[0].ms = BDRV_SECTOR_SIZE;
         id_ns->lbaf[0].ds = BDRV_SECTOR_BITS;
         id_ns->ncap  = id_ns->nuse = id_ns->nsze =
             cpu_to_le64(n->ns_size >>

@@ -362,11 +362,14 @@ static uint16_t nvme_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     uint64_t slba = le64_to_cpu(rw->slba);
     uint64_t prp1 = le64_to_cpu(rw->prp1);
     uint64_t prp2 = le64_to_cpu(rw->prp2);
+    uint64_t mptr = le64_to_cpu(rw->mptr); 
+    uint64_t metadata_len = le64_to_cpu(rw->rsvd2); /* A change in the nvme contract; the decision is to pass the metadata length in the reserved field */
 
     uint8_t lba_index  = NVME_ID_NS_FLBAS_INDEX(ns->id_ns.flbas);
     uint8_t data_shift = ns->id_ns.lbaf[lba_index].ds;
     uint64_t data_size = (uint64_t)nlb << data_shift;
     uint64_t data_offset = slba << data_shift;
+    uint8_t *metadata_buf = NULL;
     int is_write = rw->opcode == NVME_CMD_WRITE ? 1 : 0;
     enum BlockAcctType acct = is_write ? BLOCK_ACCT_WRITE : BLOCK_ACCT_READ;
 
@@ -381,6 +384,15 @@ static uint16_t nvme_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     if (nvme_map_prp(&req->qsg, &req->iov, prp1, prp2, data_size, n)) {
         block_acct_invalid(blk_get_stats(n->conf.blk), acct);
         return NVME_INVALID_FIELD | NVME_DNR;
+    }
+
+    if (metadata_len){
+        /* Temporary fix until we move io parsing to vssim.c */
+        metadata_buf = g_malloc(metadata_len);
+        cpu_physical_memory_rw(mptr, metadata_buf, metadata_len, 0); /* read metadata from dma */
+        qemu_iovec_set_metadata(&req->iov, metadata_buf, metadata_len); /* set metadata buffer in QEMUIOVector */
+        qemu_sglist_set_metadata(&req->qsg, metadata_buf, metadata_len); /* set metadata buffer in sg structure */
+        g_free(metadata_buf);
     }
 
     dma_acct_start(n->conf.blk, &req->acct, &req->qsg, acct);
@@ -1251,7 +1263,7 @@ static uint32_t nvme_pci_read_config(PCIDevice *pci_dev, uint32_t addr, int len)
 static void nvme_realize(PCIDevice *pci_dev, Error **errp)
 {
     static const uint16_t nvme_pm_offset = 0x80;
-    static const uint16_t nvme_pcie_offset = nvme_pm_offset + PCI_PM_SIZEOF;
+    static const uint16_t nvme_pcie_offset = 0x80 + PCI_PM_SIZEOF;
 
     NvmeCtrl *n = NVME(pci_dev);
     NvmeIdCtrl *id = &n->id_ctrl;

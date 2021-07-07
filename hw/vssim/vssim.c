@@ -35,6 +35,8 @@
 
 #include "simulator/vssim_config_manager.h"
 #include "simulator/ftl_sect_strategy.h"
+#include "simulator/ftl_obj_strategy.h"
+#include "simulator/uthash.h"
 
 #define VSSIM_FILE_EXTENSION                  (".vssim")
 #define VSSIM_FILE_EXTENSION_CHARACTER_LENGTH (sizeof(VSSIM_FILE_EXTENSION)-1)
@@ -45,9 +47,40 @@
 
 static bool g_device_open = false;
 
+/*
+* 2 level map:
+*   1. partition -> object_map
+*   2. object_map -> object
+*/
+typedef struct object{
+    char **memory; /* 2 level memory; each block will correspond to a page */
+    uint8_t pages; /* amount of pages */
+} object;
+
+typedef struct obj_map{
+    object_id_t id;
+    object data;
+    UT_hash_handle hh; /* makes this structure hashable */
+} obj_map;
+
+typedef struct part_map{
+    partition_id_t id;
+    obj_map *objects; /* the object map of this partition */
+    UT_hash_handle hh; /* makes this structure hashable */
+} part_map;
+
+/**
+ * This structure is initialized during the call to open,
+ * and we get its instance (as a parameter) in each of our 'driver' functions.
+ * 
+ * It's supposed to be a block driver, but we also use it for objects.
+ */
 typedef struct BDRVVSSIMState {
-    char * memory;
-    uint64_t size;
+    // TODO: add them to an union and use only the required one (according to the storage strategy value)
+    char *memory;
+    part_map *part;
+
+    uint64_t size; /* size will represent the max size of an object / length of the sector based storage*/
     bool simulator;
 } BDRVVSSIMState;
 
@@ -68,6 +101,162 @@ static QemuOptsList runtime_opts = {
         { /* end of list */ }
     },
 };
+
+static void free_object_map(obj_map *map)
+{
+    obj_map *current_mapping, *tmp;
+    uint8_t page;
+
+    HASH_ITER(hh, map, current_mapping, tmp)
+    {
+        HASH_DEL(map, current_mapping);
+        if (current_mapping->data.pages)
+        {
+            for(page = 0; page < current_mapping->data.pages; page++)
+                g_free(current_mapping->data.memory[page]);
+            g_free(current_mapping->data.memory);
+        }
+        g_free(current_mapping);
+    }
+}
+
+static void free_part_memory(part_map *map)
+{
+    part_map *current_mapping, *tmp;
+
+    HASH_ITER(hh, map, current_mapping, tmp)
+    {
+        free_object_map(map->objects);
+        HASH_DEL(map, current_mapping);
+        g_free(current_mapping);
+    }
+}
+
+/*
+*  Returns an object;
+*  use create_if_needed if you want to create a new object
+*  when one doesn't already exist
+*/
+static object* get_object(part_map **map, obj_id_t obj_loc, int create_if_needed)
+{
+    object *object = NULL;
+    /* Find (or create if possible) the partition */
+    part_map *part;
+    HASH_FIND_INT((*map), &(obj_loc.partition_id), part);
+    if (!part)
+    {
+        if (create_if_needed)
+        {
+            part = g_malloc(sizeof(part_map));
+            part->id = obj_loc.partition_id;
+            part->objects = NULL;
+            HASH_ADD_INT((*map), id, part);
+        }
+        else
+            goto exit;
+    }
+
+    /* Find (or create if possible) the object */
+    obj_map *obj;
+    HASH_FIND_INT(part->objects, &(obj_loc.object_id), obj);
+    if (!obj)
+    {
+        if (create_if_needed)
+        {
+            obj = g_malloc(sizeof(obj_map));
+            obj->id = obj_loc.object_id;
+            obj->data.memory = NULL;
+            obj->data.pages = 0;
+            HASH_ADD_INT(part->objects, id, obj);
+        }
+        else
+            goto exit;
+    }
+    object = &(obj->data);
+
+    exit:
+    return object;
+}
+
+/**
+ * Writes the qiov buffer to a given object.
+ *
+ * the functions allocates more pages (in the object) if necessary, so the write should always succeed (unless we run out of memory)
+ */
+static void write_to_object(QEMUIOVector *qiov, object *object, uint64_t offset,
+        uint64_t bytes)
+{
+    uint8_t first_page = offset / GET_PAGE_SIZE(), last_page = first_page + bytes/GET_PAGE_SIZE(), page = first_page;
+    if (!object)
+        return;
+
+    /* allocate memory if necessary */
+    if (object->pages <= last_page)
+    {
+        if (!object->pages)
+            object->memory = g_new(char *, last_page + 1);
+        else
+            object->memory = g_renew(char *, object->memory, last_page + 1);
+        for(page = object->pages; page <= last_page; page++)
+            object->memory[page] = g_malloc0(GET_PAGE_SIZE());
+        object->pages = last_page + 1;
+    }
+
+    /* write page by page */
+    for(page = first_page; page < last_page; page++)
+        qemu_iovec_to_buf(qiov, page*GET_PAGE_SIZE(), object->memory[page], GET_PAGE_SIZE());
+    qemu_iovec_to_buf(qiov, page*GET_PAGE_SIZE(), object->memory[page], bytes % GET_PAGE_SIZE());
+}
+
+/**
+ * Reads data from a given object to the qiov buffer.
+ *
+ * returns false if the read is out of bounds
+ */
+static bool read_from_object(QEMUIOVector *qiov, object *object, uint64_t offset,
+        uint64_t bytes)
+{
+    uint8_t first_page = offset / GET_PAGE_SIZE(), last_page = first_page + bytes/GET_PAGE_SIZE(), page = first_page;
+    if (!object || object->pages <= last_page)
+        return false;
+
+    /* read page by page */
+    for(page = first_page; page < last_page; page++)
+        qemu_iovec_from_buf(qiov, page*GET_PAGE_SIZE(), object->memory[page], GET_PAGE_SIZE());
+    qemu_iovec_from_buf(qiov, page*GET_PAGE_SIZE(), object->memory[page], bytes % GET_PAGE_SIZE());
+
+    return true;
+}
+
+/* this function is from the old qemu */
+static bool parse_metadata(uint8_t *metadata_mapping_address, unsigned int metadata_size, obj_id_t *obj_loc)
+{
+    char MAGIC[] = "eVSSIM_MAGIC";
+    int MAGIC_LENGTH = 12;
+    char *asACharArray = (char *)metadata_mapping_address;
+    asACharArray[metadata_size - 1] = '\0';
+    char *magicSuffixPtr = NULL;
+    if (!memcmp(MAGIC, asACharArray, MAGIC_LENGTH))
+    {
+        asACharArray += MAGIC_LENGTH;
+        magicSuffixPtr = strchr(asACharArray, '!');
+        if (magicSuffixPtr)
+        {
+            char *seperatorPtr = strchr(asACharArray, '_');
+            if (seperatorPtr != NULL)
+            {
+                *seperatorPtr = '\x00';
+                *magicSuffixPtr = '\x00';
+                obj_loc->partition_id = atoi(asACharArray);
+                obj_loc->object_id = atoi(seperatorPtr + 1);
+                *seperatorPtr = '_';
+                *magicSuffixPtr = '!';
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 static int vssim_open(BlockDriverState *bs, QDict * dict, int flags,
                       Error **errp)
@@ -91,16 +280,24 @@ static int vssim_open(BlockDriverState *bs, QDict * dict, int flags,
     s->simulator = qemu_opt_get_bool(opts, VSSIM_BLOCK_OPT_SIMULATOR, true);
     qemu_opts_del(opts);
 
-    // Allocate the memory
-    s->memory = qemu_blockalign0(bs, s->size);
+    /* 
+    * There's a bug in the tests, and the value of STORAGE_STRATEGY isn't set properly,
+    * because of this, we have no choice but to allocate memory for sector strategy, even
+    * when we use object strategy.
+    * TODO: Fix this bug, and allocate memory to sector strategy only when necessary.
+    */
+    s->memory = qemu_blockalign0(bs, s->size); // sector strategy
+    s->part = NULL;  // object strategy, we don't have to allocate anything for now;
+
 
     // Initialize FTL and logger
     if (s->simulator) {
         FTL_INIT();
         INIT_LOG_MANAGER();
+        INIT_OBJ_STRATEGY(); // TODO: init only when necessary (aka only when using object strategy)
     }
 
-    trace_vssim_initialized(bs, s->size, s->memory);
+    trace_vssim_initialized(bs, s->size, s->memory); // TODO: trace it only when using sector strategy
 
     return 0;
 }
@@ -114,15 +311,87 @@ static void vssim_close(BlockDriverState *bs)
     if (s->simulator) {
         TERM_LOG_MANAGER();
         FTL_TERM();
+        TERM_OBJ_STRATEGY(); // TODO: destroy it only when necessary (only when there's an equivelent call to INIT_OBJ_STRATEGY in the open function)
     }
 
     // Clear memory
-    if (NULL != s->memory) {
+    // TODO: once we move memory and part into an union, there should be an appropriate check to the storage strategy
+    if (NULL != s->memory)
+    {
         qemu_vfree(s->memory);
     }
+    free_part_memory(s->part);
 
     // Clear singleton state
     g_device_open = false;
+}
+
+/**
+ * Object private read & write function.
+ *
+ * use write to distinguise between read & write mode (0 = read, non-zero = write).
+ * qiov should hold the metadata info (used to find the object info)
+ */
+static int object_prwv(BDRVVSSIMState *s, uint64_t offset,
+        uint64_t bytes, QEMUIOVector *qiov, int write)
+{
+    int ret = 0;
+    uint8_t *meta_buf = NULL;
+    object *object = NULL;
+    obj_id_t obj_loc = {
+        .partition_id = 0,
+        .object_id = 0};
+
+    if (!qiov->metadata_len)
+    {
+        ret |= BDRV_BLOCK_ZERO; /* TODO: define a new value for this case */
+        goto exit;
+    }
+
+    /* parse metadata */
+    meta_buf = g_malloc(qiov->metadata_len);
+    qemu_iovec_get_metadata(qiov, meta_buf, qiov->metadata_len);
+    if (!parse_metadata(meta_buf, qiov->metadata_len, &obj_loc))
+    {
+        ret |= BDRV_BLOCK_ZERO; /* TODO: define a new value for this case */
+        goto exit;
+    }
+    g_free(meta_buf);
+    meta_buf = NULL;
+
+    /* Fetch the object from the hashmap */
+    if (!(object = get_object(&(s->part), obj_loc, write)))
+    {
+        ret |= BDRV_BLOCK_DATA; /* TODO: define a new value for this case */
+        goto exit;
+    }
+
+    if (write)
+        write_to_object(qiov, object, offset, bytes);
+    else
+        if (!read_from_object(qiov, object, offset, bytes))
+        {
+            ret |= BDRV_BLOCK_EOF;
+            goto exit;
+        }
+
+    // Pass rw to simulator
+    if (s->simulator)
+    {
+        if (write)
+        {
+            if (!lookup_object(obj_loc.object_id))
+                _FTL_OBJ_CREATE(obj_loc, bytes);
+            _FTL_OBJ_WRITE(obj_loc, offset, bytes);
+        }
+        else
+            _FTL_OBJ_READ(obj_loc, offset, bytes);
+    }
+
+    exit:
+    if (meta_buf)
+        g_free(meta_buf);
+    return ret;
 }
 
 static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
@@ -131,12 +400,18 @@ static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
     BDRVVSSIMState *s = bs->opaque;
     trace_vssim_read(bs, offset, bytes);
 
-    // Read from memory
-    qemu_iovec_from_buf(qiov, 0, s->memory + offset, bytes);
-
-    // Pass write to simulator
-    if (s->simulator) {
-        _FTL_READ_SECT(offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE());
+    if (STORAGE_STRATEGY == 2) /* object strategy */
+    {
+        return object_prwv(s, offset, bytes, qiov, 0);
+    }
+    else /* sector strategy */
+    {
+        // Read from memory
+        qemu_iovec_from_buf(qiov, 0, s->memory + offset, bytes);
+        
+        // Pass read to simulator
+        if (s->simulator)
+            _FTL_READ_SECT(offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE());
     }
 
     return 0;
@@ -148,14 +423,19 @@ static int coroutine_fn vssim_co_pwritev(BlockDriverState *bs, uint64_t offset,
     BDRVVSSIMState *s = bs->opaque;
     trace_vssim_write(bs, offset, bytes);
 
-    // Write to iovec buffer
-    qemu_iovec_to_buf(qiov, 0, s->memory + offset, bytes);
-
-    // Pass write to simulator
-    if (s->simulator) {
-        _FTL_WRITE_SECT(offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE());
+    if (STORAGE_STRATEGY == 2) /* object strategy */
+    {
+        return object_prwv(s, offset, bytes, qiov, 1);
     }
-
+    else /* sector strategy */
+    {
+        // Write to iovec buffer
+        qemu_iovec_to_buf(qiov, 0, s->memory + offset, bytes);
+      
+        // Pass write to simulator
+        if (s->simulator)
+            _FTL_WRITE_SECT(offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE());
+    }
     return 0;
 }
 

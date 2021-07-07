@@ -134,6 +134,8 @@ typedef struct QEMUIOVector {
     struct iovec *iov;
     int niov;
     int nalloc;
+    void *metadata;
+    size_t metadata_len;
     size_t size;
 } QEMUIOVector;
 
@@ -148,6 +150,8 @@ size_t qemu_iovec_concat_iov(QEMUIOVector *dst,
 bool qemu_iovec_is_zero(QEMUIOVector *qiov);
 void qemu_iovec_destroy(QEMUIOVector *qiov);
 void qemu_iovec_reset(QEMUIOVector *qiov);
+size_t qemu_iovec_get_metadata(QEMUIOVector *qiov, void *buf, size_t bytes);
+size_t qemu_iovec_set_metadata(QEMUIOVector *qiov, void *buf, size_t bytes);
 size_t qemu_iovec_to_buf(QEMUIOVector *qiov, size_t offset,
                          void *buf, size_t bytes);
 size_t qemu_iovec_from_buf(QEMUIOVector *qiov, size_t offset,

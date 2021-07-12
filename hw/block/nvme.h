@@ -35,6 +35,18 @@ typedef struct NvmeSQueue {
     QTAILQ_ENTRY(NvmeSQueue) entry;
 } NvmeSQueue;
 
+typedef struct AsyncResult {
+    uint8_t event_type;
+    uint8_t event_info;
+    uint8_t log_page;
+    uint8_t resv;
+} AsyncResult;
+
+typedef struct AsyncEvent {
+    AsyncResult result;
+    QTAILQ_ENTRY(AsyncEvent)entry;
+} AsyncEvent;
+
 typedef struct NvmeCQueue {
     struct NvmeCtrl *ctrl;
     uint8_t     phase;
@@ -45,9 +57,13 @@ typedef struct NvmeCQueue {
     uint32_t    vector;
     uint32_t    size;
     uint64_t    dma_addr;
+    uint8_t    outstanding_asyncs;
     QEMUTimer   *timer;
+    QEMUTimer   *async_req_timer;
     QTAILQ_HEAD(sq_list, NvmeSQueue) sq_list;
     QTAILQ_HEAD(cq_req_list, NvmeRequest) req_list;
+    QTAILQ_HEAD(async_req_list, NvmeRequest) async_req_list;
+    QTAILQ_HEAD(event_queue, AsyncEvent) event_queue;
 } NvmeCQueue;
 
 typedef struct NvmeNamespace {
@@ -88,6 +104,9 @@ typedef struct NvmeCtrl {
     NvmeSQueue      admin_sq;
     NvmeCQueue      admin_cq;
     NvmeIdCtrl      id_ctrl;
+
+    struct NvmeFeatureVal feature;
+    bool temp_warn_issued;
 } NvmeCtrl;
 
 #endif /* HW_NVME_H */

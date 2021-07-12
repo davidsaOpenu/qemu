@@ -210,6 +210,11 @@ enum NvmeCmbszMask {
 #define NVME_CMBSZ_GETSIZE(cmbsz) \
     (NVME_CMBSZ_SZ(cmbsz) * (1 << (12 + 4 * NVME_CMBSZ_SZU(cmbsz))))
 
+
+#define NVME_SPARE_THRESH 20
+#define NVME_TEMPERATURE 0x143
+#define PAGE_SIZE 4096
+
 typedef struct NvmeCmd {
     uint8_t     opcode;
     uint8_t     fuse;
@@ -480,6 +485,12 @@ typedef struct NvmeFwSlotInfoLog {
     uint8_t     reserved2[448];
 } NvmeFwSlotInfoLog;
 
+enum {
+    NVME_LOG_ERROR_INFORMATION   = 0x01,
+    NVME_LOG_SMART_INFORMATION   = 0x02,
+    NVME_LOG_FW_SLOT_INFORMATION = 0x03,
+};
+
 typedef struct NvmeErrorLog {
     uint64_t    error_count;
     uint16_t    sqid;
@@ -491,6 +502,20 @@ typedef struct NvmeErrorLog {
     uint8_t     vs;
     uint8_t     resv[35];
 } NvmeErrorLog;
+
+enum {
+    event_type_error = 0,
+    event_type_smart = 1,
+    event_info_err_invalid_sq = 0,
+    event_info_err_invalid_db = 1,
+    event_info_err_diag_fail  = 2,
+    event_info_err_pers_internal_err = 3,
+    event_info_err_trans_internal_err = 4,
+    event_info_err_fw_img_load_err = 5,
+    event_info_smart_reliability = 0,
+    event_info_smart_temp_thresh = 1,
+    event_info_smart_spare_thresh = 2
+};
 
 typedef struct NvmeSmartLog {
     uint8_t     critical_warning;
@@ -601,7 +626,7 @@ typedef struct NvmeFeatureVal {
     uint32_t    volatile_wc;
     uint32_t    num_queues;
     uint32_t    int_coalescing;
-    uint32_t    *int_vector_config;
+    uint32_t    int_vector_config;
     uint32_t    write_atomicity;
     uint32_t    async_config;
     uint32_t    sw_prog_marker;

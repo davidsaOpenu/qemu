@@ -291,6 +291,83 @@ static void nvme_post_cqes(void *opaque)
     nvme_irq_assert(n, cq);
 }
 
+/**
+ * Asynchronous event proccessing
+ *
+ * this function is the bare bone of the async-event system,
+ * every event is added to the event_queue and pulled from here once there
+ * is an async request for an event (adm_cmd_async_ev_req).
+ */
+static void nvme_async_req(void *opaque)
+{
+    NvmeCQueue *cq = opaque;
+    NvmeCtrl *n = cq->ctrl;
+    NvmeRequest *req, *req_next;
+
+    // Fast path if nothing to be processed
+    if (QTAILQ_EMPTY(&cq->async_req_list)) {
+        return;
+    }
+
+    QTAILQ_FOREACH_SAFE(req, &cq->async_req_list, entry, req_next) {
+        NvmeSQueue *sq;
+        hwaddr addr;
+        AsyncResult *result;
+        AsyncEvent *event, *event_next;
+
+        if (nvme_cq_full(cq)) {
+            break;
+        }
+
+        // No events!
+        if (QTAILQ_EMPTY(&cq->event_queue)) {
+            break;
+        }
+
+        QTAILQ_REMOVE(&cq->async_req_list, req, entry);
+
+        // TODO: Implement an efficient function to pop an event from the queue
+        QTAILQ_FOREACH_SAFE(event, &cq->event_queue, entry, event_next) {
+            QTAILQ_REMOVE(&cq->event_queue, event, entry);
+            break;
+        }
+
+        result = (AsyncResult *)&req->cqe.result;
+        result->event_type = event->result.event_type;
+        result->event_info = event->result.event_info;
+        result->log_page   = event->result.log_page;
+        g_free(event);
+
+        cq->outstanding_asyncs--;
+        sq = req->sq;
+        req->cqe.status = cpu_to_le16((req->status << 1) | cq->phase);
+        req->cqe.sq_id = cpu_to_le16(sq->sqid);
+        req->cqe.sq_head = cpu_to_le16(sq->head);
+        addr = cq->dma_addr + cq->tail * n->cqe_size;
+        nvme_inc_cq_tail(cq);
+        pci_dma_write(&n->parent_obj, addr, (void *)&req->cqe,
+            sizeof(req->cqe));
+        QTAILQ_INSERT_TAIL(&sq->req_list, req, entry);
+    }
+    msix_notify(&(n->parent_obj), 0);
+}
+
+/**
+ * This function is used to generate a new event (and adds it to the event_queue)
+ */
+static void enqueue_async_event(NvmeCtrl *n, uint8_t event_type, uint8_t event_info, uint8_t log_page)
+{
+    AsyncEvent *event = (AsyncEvent *)g_malloc(sizeof(AsyncEvent));
+
+    event->result.event_type = event_type;
+    event->result.event_info = event_info;
+    event->result.log_page   = log_page;
+
+    QTAILQ_INSERT_TAIL(&(n->admin_cq.event_queue), event, entry);
+
+    timer_mod(n->admin_cq.async_req_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 20000);
+}
+
 static void nvme_enqueue_req_completion(NvmeCQueue *cq, NvmeRequest *req)
 {
     assert(cq->cqid == req->sq->cqid);
@@ -560,6 +637,8 @@ static void nvme_free_cq(NvmeCQueue *cq, NvmeCtrl *n)
     n->cq[cq->cqid] = NULL;
     timer_del(cq->timer);
     timer_free(cq->timer);
+    timer_del(cq->async_req_timer);
+    timer_free(cq->async_req_timer);
     msix_vector_unuse(&n->parent_obj, cq->vector);
     if (cq->cqid) {
         g_free(cq);
@@ -599,10 +678,13 @@ static void nvme_init_cq(NvmeCQueue *cq, NvmeCtrl *n, uint64_t dma_addr,
     cq->vector = vector;
     cq->head = cq->tail = 0;
     QTAILQ_INIT(&cq->req_list);
+    QTAILQ_INIT(&cq->async_req_list);
+    QTAILQ_INIT(&cq->event_queue);
     QTAILQ_INIT(&cq->sq_list);
     msix_vector_use(&n->parent_obj, cq->vector);
     n->cq[cqid] = cq;
     cq->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, nvme_post_cqes, cq);
+    cq->async_req_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, nvme_async_req, cq);
 }
 
 static uint16_t nvme_create_cq(NvmeCtrl *n, NvmeCmd *cmd)
@@ -723,10 +805,10 @@ static uint16_t nvme_identify(NvmeCtrl *n, NvmeCmd *cmd)
 
 static uint16_t nvme_get_feature(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
 {
-    uint32_t dw10 = le32_to_cpu(cmd->cdw10);
+    uint8_t fid = (uint8_t)le32_to_cpu(cmd->cdw10); /* fid uses only 8 bits */
     uint32_t result;
 
-    switch (dw10) {
+    switch (fid) {
     case NVME_VOLATILE_WRITE_CACHE:
         result = blk_enable_write_cache(n->conf.blk);
         trace_nvme_getfeat_vwcache(result ? "enabled" : "disabled");
@@ -735,8 +817,38 @@ static uint16_t nvme_get_feature(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
         result = cpu_to_le32((n->num_queues - 2) | ((n->num_queues - 2) << 16));
         trace_nvme_getfeat_numq(result);
         break;
+    case NVME_ARBITRATION:
+        result = n->feature.arbitration;
+        break;
+    case NVME_POWER_MANAGEMENT:
+        result = n->feature.power_mgmt;
+        break;
+    case NVME_LBA_RANGE_TYPE:
+        return NVME_DNR; /* TODO: add support to lba range type */
+        break;
+    case NVME_TEMPERATURE_THRESHOLD:
+        result = n->feature.temp_thresh;
+        break;
+    case NVME_ERROR_RECOVERY:
+        result = n->feature.err_rec;
+        break;
+    case NVME_INTERRUPT_COALESCING:
+        result = n->feature.int_coalescing;
+        break;
+    case NVME_INTERRUPT_VECTOR_CONF:
+        result = n->feature.int_vector_config;
+        break;
+    case NVME_WRITE_ATOMICITY:
+        result = n->feature.write_atomicity;
+        break;
+    case NVME_ASYNCHRONOUS_EVENT_CONF:
+        result = n->feature.async_config;
+        break;
+    case NVME_SOFTWARE_PROGRESS_MARKER:
+        result = n->feature.sw_prog_marker;
+        break;
     default:
-        trace_nvme_err_invalid_getfeat(dw10);
+        trace_nvme_err_invalid_getfeat(fid);
         return NVME_INVALID_FIELD | NVME_DNR;
     }
 
@@ -746,10 +858,10 @@ static uint16_t nvme_get_feature(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
 
 static uint16_t nvme_set_feature(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
 {
-    uint32_t dw10 = le32_to_cpu(cmd->cdw10);
+    uint8_t fid = (uint8_t)le32_to_cpu(cmd->cdw10); /* fid uses only 8 bits */
     uint32_t dw11 = le32_to_cpu(cmd->cdw11);
 
-    switch (dw10) {
+    switch (fid) {
     case NVME_VOLATILE_WRITE_CACHE:
         blk_set_enable_write_cache(n->conf.blk, dw11 & 1);
         break;
@@ -760,11 +872,158 @@ static uint16_t nvme_set_feature(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
         req->cqe.result =
             cpu_to_le32((n->num_queues - 2) | ((n->num_queues - 2) << 16));
         break;
+    case NVME_ARBITRATION:
+        n->feature.arbitration = dw11;
+        break;
+    case NVME_POWER_MANAGEMENT:
+        n->feature.power_mgmt = dw11;
+        break;
+    case NVME_LBA_RANGE_TYPE:
+        return NVME_DNR; /* TODO: add support to lba range type */
+        break;
+    case NVME_TEMPERATURE_THRESHOLD:
+        n->feature.temp_thresh = dw11;
+        if (n->feature.temp_thresh <= NVME_TEMPERATURE &&
+                !n->temp_warn_issued) {
+            n->temp_warn_issued = 1;
+            enqueue_async_event(n, event_type_smart,
+                event_info_smart_temp_thresh, NVME_LOG_SMART_INFORMATION);
+        }
+        break;
+    case NVME_ERROR_RECOVERY:
+        n->feature.err_rec = dw11;
+        break;
+    case NVME_INTERRUPT_COALESCING:
+        n->feature.int_coalescing = dw11;
+        break;
+    case NVME_INTERRUPT_VECTOR_CONF:
+        n->feature.int_vector_config = dw11;
+        break;
+    case NVME_WRITE_ATOMICITY:
+        n->feature.write_atomicity = dw11;
+        break;
+    case NVME_ASYNCHRONOUS_EVENT_CONF:
+        n->feature.async_config = dw11;
+        break;
+    case NVME_SOFTWARE_PROGRESS_MARKER:
+        n->feature.sw_prog_marker = dw11;
+        break;
     default:
-        trace_nvme_err_invalid_setfeat(dw10);
+        trace_nvme_err_invalid_setfeat(fid);
         return NVME_INVALID_FIELD | NVME_DNR;
     }
     return NVME_SUCCESS;
+}
+
+/**
+ * builds an empty log page
+ *
+ * TODO: build a real log page
+ */
+static uint16_t adm_cmd_smart_info(NvmeCtrl *n, NvmeCmd *cmd,  NvmeRequest *req)
+{
+    uint32_t len, buf_len, trans_len;
+    NvmeSmartLog smart_log;
+
+    buf_len = (((cmd->cdw10 >> 16) & 0xfff) + 1) * 4;
+    trans_len = sizeof(smart_log) < buf_len ? sizeof(smart_log) : buf_len;
+
+    memset(&smart_log, 0x0, sizeof(smart_log));
+    if (cmd->nsid == 0xffffffff || !(n->id_ctrl.lpa & 0x1)) {
+        /* TODO: return info for entire device */
+    } else if (cmd->nsid > 0 && cmd->nsid <= n->num_namespaces &&
+        (n->id_ctrl.lpa & 0x1)) {
+        /* TODO: return info for specific ns */
+    } else {
+        return NVME_INVALID_NSID;
+    }
+
+    /* just make up a temperature. 0x143 Kelvin is 50 degrees C. */
+    smart_log.temperature[0] = NVME_TEMPERATURE & 0xff;
+    smart_log.temperature[1] = (NVME_TEMPERATURE >> 8) & 0xff;
+
+    smart_log.available_spare_threshold = NVME_SPARE_THRESH;
+    if (smart_log.available_spare <= NVME_SPARE_THRESH) {
+        smart_log.critical_warning |= 1 << 0;
+    }
+
+    len = (PAGE_SIZE - (cmd->prp1 % PAGE_SIZE)) < trans_len ? (PAGE_SIZE - (cmd->prp1 % PAGE_SIZE)) : trans_len;
+    cpu_physical_memory_rw(cmd->prp1, (uint8_t *)&smart_log, len, 1);
+    if (len < trans_len) {
+        cpu_physical_memory_rw(cmd->prp2, (uint8_t *)((uint8_t *)&smart_log + len),
+            trans_len - len, 1);
+    }
+
+    return NVME_SUCCESS;
+}
+
+/**
+ * builds an (almost) empty log info page
+ *
+ * TODO: build a real log page
+ */
+static uint16_t adm_cmd_fw_log_info(NvmeCtrl *n, NvmeCmd *cmd,  NvmeRequest *req)
+{
+    NvmeFwSlotInfoLog fw_info;
+    uint32_t len, buf_len, trans_len;
+
+    buf_len = (((cmd->cdw10 >> 16) & 0xfff) + 1) * 4;
+    trans_len = sizeof(fw_info) < buf_len ? sizeof(fw_info) : buf_len;
+
+    memset(&fw_info, 0x0, sizeof(fw_info));
+
+    // TODO: find a way to fetch the page_size from vssim.c
+    len = (PAGE_SIZE - (cmd->prp1 % PAGE_SIZE)) < trans_len ? (PAGE_SIZE - (cmd->prp1 % PAGE_SIZE)) : trans_len;
+    cpu_physical_memory_rw(cmd->prp1, (uint8_t *)&fw_info, len, 1);
+    if (len < trans_len) {
+        cpu_physical_memory_rw(cmd->prp2, (uint8_t *)((uint8_t *)&fw_info + len),
+            trans_len - len, 1);
+    }
+
+    return NVME_SUCCESS;
+}
+
+/**
+ * This is a dummy function
+ *
+ * TODO: Implement the functions adm_cmd_smart_info, adm_cmd_fw_log_info
+ */
+static uint16_t nvme_get_log_page(NvmeCtrl *n, NvmeCmd *cmd,  NvmeRequest *req)
+{
+    uint8_t lid = (uint8_t)le32_to_cpu(cmd->cdw10); /* lid uses only 8 bits */
+
+    switch (lid) {
+    case NVME_LOG_ERROR_INFO:
+        return NVME_SUCCESS;
+        break;
+    case NVME_LOG_SMART_INFO:
+        return adm_cmd_smart_info(n, cmd,  req);
+        break;
+    case NVME_LOG_FW_SLOT_INFO:
+        return adm_cmd_fw_log_info(n, cmd, req);
+        break;
+    default:
+        return NVME_CMD_ABORT_FAILED_FUSE | NVME_INVALID_CQID;
+        break;
+    }
+}
+
+static uint16_t adm_cmd_async_ev_req(NvmeCtrl *n, NvmeCmd *cmd,  NvmeRequest *req)
+{
+    NvmeCQueue *cq = n->cq[req->sq->cqid]; /* since this is an admin request, this is the same as n->admin_cq */
+    if (cq->outstanding_asyncs > n->id_ctrl.aerl + 1){
+        req->cqe.cid = n->id_ctrl.aerl;
+        req->cqe.rsvd = cq->outstanding_asyncs;
+        return NVME_AER_LIMIT_EXCEEDED;
+    }
+
+    cq->outstanding_asyncs++;
+    req->status = NVME_SUCCESS;
+    QTAILQ_REMOVE(&req->sq->out_req_list, req, entry);
+    QTAILQ_INSERT_TAIL(&cq->async_req_list, req, entry);
+    timer_mod(cq->async_req_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 10000);
+
+    return NVME_NO_COMPLETE;
 }
 
 static uint16_t nvme_admin_cmd(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
@@ -784,6 +1043,10 @@ static uint16_t nvme_admin_cmd(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
         return nvme_set_feature(n, cmd, req);
     case NVME_ADM_CMD_GET_FEATURES:
         return nvme_get_feature(n, cmd, req);
+    case NVME_ADM_CMD_GET_LOG_PAGE:
+        return nvme_get_log_page(n, cmd, req);
+    case NVME_ADM_CMD_ASYNC_EV_REQ:
+        return adm_cmd_async_ev_req(n, cmd, req);
     default:
         trace_nvme_err_invalid_admin_opc(cmd->opcode);
         return NVME_INVALID_OPCODE | NVME_DNR;
@@ -1133,6 +1396,8 @@ static void nvme_process_db(NvmeCtrl *n, hwaddr addr, int val)
                            "completion queue doorbell write"
                            " for nonexistent queue,"
                            " sqid=%"PRIu32", ignoring", qid);
+            enqueue_async_event(n, event_type_error,
+                event_info_err_invalid_sq, NVME_LOG_ERROR_INFORMATION);
             return;
         }
 
@@ -1143,6 +1408,8 @@ static void nvme_process_db(NvmeCtrl *n, hwaddr addr, int val)
                            " beyond queue size, sqid=%"PRIu32","
                            " new_head=%"PRIu16", ignoring",
                            qid, new_head);
+            enqueue_async_event(n, event_type_error,
+                event_info_err_invalid_db, NVME_LOG_ERROR_INFORMATION);
             return;
         }
 
@@ -1182,6 +1449,8 @@ static void nvme_process_db(NvmeCtrl *n, hwaddr addr, int val)
                            "submission queue doorbell write"
                            " for nonexistent queue,"
                            " sqid=%"PRIu32", ignoring", qid);
+            enqueue_async_event(n, event_type_error,
+                event_info_err_invalid_sq, NVME_LOG_ERROR_INFORMATION);
             return;
         }
 
@@ -1192,6 +1461,8 @@ static void nvme_process_db(NvmeCtrl *n, hwaddr addr, int val)
                            " beyond queue size, sqid=%"PRIu32","
                            " new_tail=%"PRIu16", ignoring",
                            qid, new_tail);
+            enqueue_async_event(n, event_type_error,
+                event_info_err_invalid_db, NVME_LOG_ERROR_INFORMATION);
             return;
         }
 

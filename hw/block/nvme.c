@@ -465,10 +465,10 @@ static uint16_t nvme_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 
     if (metadata_len){
         /* Temporary fix until we move io parsing to vssim.c */
-        metadata_buf = g_malloc(metadata_len);
+        metadata_buf = g_malloc(metadata_len + 1); // for null
         cpu_physical_memory_rw(mptr, metadata_buf, metadata_len, 0); /* read metadata from dma */
-        qemu_iovec_set_metadata(&req->iov, metadata_buf, metadata_len); /* set metadata buffer in QEMUIOVector */
-        qemu_sglist_set_metadata(&req->qsg, metadata_buf, metadata_len); /* set metadata buffer in sg structure */
+        qemu_iovec_set_metadata(&req->iov, metadata_buf, metadata_len + 1); /* set metadata buffer in QEMUIOVector */
+        qemu_sglist_set_metadata(&req->qsg, metadata_buf, metadata_len + 1); /* set metadata buffer in sg structure */
         g_free(metadata_buf);
     }
 

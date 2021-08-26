@@ -2027,6 +2027,10 @@ if test "$vssim" = "yes" ; then
     symlink "$vssim_source/LOG_MGR/logging_offline_analyzer.h" "$vssim_target/logging_offline_analyzer.h"
     symlink "$vssim_source/LOG_MGR/logging_offline_analyzer.c" "$vssim_target/logging_offline_analyzer.c"
 
+    vssim_cflags="-I/usr/include/json-c/ -D__STDC_VERSION__=0"
+    LIBS="-ljson-c $LIBS"
+
+
 fi
 
 
@@ -5806,7 +5810,7 @@ echo_version() {
 }
 
 # prepend pixman and ftd flags after all config tests are done
-QEMU_CFLAGS="$pixman_cflags $fdt_cflags $QEMU_CFLAGS"
+QEMU_CFLAGS="$pixman_cflags $fdt_cflags $vssim_cflags $QEMU_CFLAGS"
 QEMU_LDFLAGS="$fdt_ldflags $QEMU_LDFLAGS"
 libs_softmmu="$pixman_libs $libs_softmmu"
 

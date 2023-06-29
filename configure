@@ -1984,6 +1984,8 @@ LIBS="-lwebsockets $LIBS"
 
 # Configure optional vssim links
 if test "$vssim" = "yes" ; then
+    QEMU_CFLAGS="-I/usr/include/json-c/ -D__STDC_VERSION__=0 $QEMU_CFLAGS"
+    LIBS="-ljson-c $LIBS"
     vssim_source="$source_path/../simulator/eVSSIM"
     vssim_target="$source_path/hw/vssim/simulator"
     symlink "$vssim_source/SSD_MODULE/ssd_io_manager.h" "$vssim_target/ssd_io_manager.h"

@@ -312,7 +312,7 @@ enum NvmeQueueFlags {
     NVME_Q_PRIO_LOW     = 3,
 };
 
-typedef struct NvmeIdentify {
+typedef struct QEMU_PACKED NvmeIdentify {
     uint8_t     opcode;
     uint8_t     flags;
     uint16_t    cid;
@@ -320,8 +320,13 @@ typedef struct NvmeIdentify {
     uint64_t    rsvd2[2];
     uint64_t    prp1;
     uint64_t    prp2;
-    uint32_t    cns;
-    uint32_t    rsvd11[5];
+    uint8_t     cns;
+    uint8_t     rsvd10;
+    uint16_t    ctrlid;
+    uint16_t    nvmsetid;
+    uint8_t     rsvd11;
+    uint8_t     csi;
+    uint32_t    rsvd12[4];
 } NvmeIdentify;
 
 typedef struct NvmeRwCmd {
@@ -630,6 +635,7 @@ typedef struct NvmeFeatureVal {
     uint32_t    write_atomicity;
     uint32_t    async_config;
     uint32_t    sw_prog_marker;
+    uint32_t    key_value_csi;
 } NvmeFeatureVal;
 
 #define NVME_ARB_AB(arb)    (arb & 0x7)
@@ -641,6 +647,7 @@ typedef struct NvmeFeatureVal {
 #define NVME_INTC_TIME(intc)    ((intc >> 8) & 0xff)
 
 enum NvmeFeatureIds {
+    // nvme spec feature ids
     NVME_ARBITRATION                = 0x1,
     NVME_POWER_MANAGEMENT           = 0x2,
     NVME_LBA_RANGE_TYPE             = 0x3,
@@ -652,7 +659,10 @@ enum NvmeFeatureIds {
     NVME_INTERRUPT_VECTOR_CONF      = 0x9,
     NVME_WRITE_ATOMICITY            = 0xa,
     NVME_ASYNCHRONOUS_EVENT_CONF    = 0xb,
-    NVME_SOFTWARE_PROGRESS_MARKER   = 0x80
+    NVME_SOFTWARE_PROGRESS_MARKER   = 0x80,
+
+    // Vendor specific features ids
+    NVME_SET_KEY_VALUE_CSI          = 0xC0,  // Change the namespace CSI value to key-value.
 };
 
 typedef struct NvmeRangeType {

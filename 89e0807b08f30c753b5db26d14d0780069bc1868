@@ -16,6 +16,23 @@
       "message": "Thanks for working on this. Time to revert https://review.gerrithub.io/c/davidsaOpenu/simulator/+/1168011",
       "revId": "89e0807b08f30c753b5db26d14d0780069bc1868",
       "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "a7cc3891_f93cb35c",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 3
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 1007990
+      },
+      "writtenOn": "2023-09-10T21:29:48Z",
+      "side": 1,
+      "message": "verified: https://review.gerrithub.io/c/davidsaOpenu/simulator/+/1168765",
+      "revId": "89e0807b08f30c753b5db26d14d0780069bc1868",
+      "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735"
     }
   ]
 }

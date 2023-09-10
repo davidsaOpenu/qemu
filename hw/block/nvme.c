@@ -24,6 +24,7 @@
  * offset 0 in BAR2 and supports only WDS, RDS and SQS for now.
  */
 
+
 #include "qemu/osdep.h"
 #include "qemu/range.h"
 #include "hw/block/block.h"
@@ -535,7 +536,7 @@ static uint16_t nvme_del_sq(NvmeCtrl *n, NvmeCmd *cmd)
     NvmeSQueue *sq;
     NvmeCQueue *cq;
     uint16_t qid = le16_to_cpu(c->qid);
-
+    
     if (unlikely(!qid || !nvme_used_sqid(n, qid))) {
         trace_nvme_err_invalid_del_sq(qid);
         return NVME_INVALID_QID | NVME_DNR;
@@ -579,7 +580,6 @@ static void nvme_init_sq(NvmeSQueue *sq, NvmeCtrl *n, uint64_t dma_addr,
     sq->cqid = cqid;
     sq->head = sq->tail = 0;
     sq->io_req = g_new(NvmeRequest, sq->size);
-
     QTAILQ_INIT(&sq->req_list);
     QTAILQ_INIT(&sq->out_req_list);
     for (i = 0; i < sq->size; i++) {
@@ -677,6 +677,7 @@ static void nvme_init_cq(NvmeCQueue *cq, NvmeCtrl *n, uint64_t dma_addr,
     cq->irq_enabled = irq_enabled;
     cq->vector = vector;
     cq->head = cq->tail = 0;
+    cq->outstanding_asyncs = 0;
     QTAILQ_INIT(&cq->req_list);
     QTAILQ_INIT(&cq->async_req_list);
     QTAILQ_INIT(&cq->event_queue);
@@ -1011,7 +1012,7 @@ static uint16_t nvme_get_log_page(NvmeCtrl *n, NvmeCmd *cmd,  NvmeRequest *req)
 static uint16_t adm_cmd_async_ev_req(NvmeCtrl *n, NvmeCmd *cmd,  NvmeRequest *req)
 {
     NvmeCQueue *cq = n->cq[req->sq->cqid]; /* since this is an admin request, this is the same as n->admin_cq */
-    if (cq->outstanding_asyncs > n->id_ctrl.aerl + 1){
+    if (cq->outstanding_asyncs > n->id_ctrl.aerl){
         req->cqe.cid = n->id_ctrl.aerl;
         req->cqe.rsvd = cq->outstanding_asyncs;
         return NVME_AER_LIMIT_EXCEEDED;
@@ -1063,7 +1064,6 @@ static void nvme_process_sq(void *opaque)
     hwaddr addr;
     NvmeCmd cmd;
     NvmeRequest *req;
-
     while (!(nvme_sq_empty(sq) || QTAILQ_EMPTY(&sq->req_list))) {
         addr = sq->dma_addr + sq->head * n->sqe_size;
         nvme_addr_read(n, addr, (void *)&cmd, sizeof(cmd));

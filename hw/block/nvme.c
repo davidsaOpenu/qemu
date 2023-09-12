@@ -848,6 +848,9 @@ static uint16_t nvme_get_feature(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
     case NVME_SOFTWARE_PROGRESS_MARKER:
         result = n->feature.sw_prog_marker;
         break;
+    case NVME_SET_KEY_VALUE_CSI:
+        result = n->feature.key_value_csi;
+        break;
     default:
         trace_nvme_err_invalid_getfeat(fid);
         return NVME_INVALID_FIELD | NVME_DNR;
@@ -908,6 +911,9 @@ static uint16_t nvme_set_feature(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
         break;
     case NVME_SOFTWARE_PROGRESS_MARKER:
         n->feature.sw_prog_marker = dw11;
+        break;
+    case NVME_SET_KEY_VALUE_CSI:
+        n->feature.key_value_csi = dw11;
         break;
     default:
         trace_nvme_err_invalid_setfeat(fid);

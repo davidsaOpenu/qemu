@@ -258,6 +258,34 @@ static uint16_t nvme_dma_read_prp(NvmeCtrl *n, uint8_t *ptr, uint32_t len,
     return status;
 }
 
+static uint16_t nvme_dma_write_prp(NvmeCtrl *n, uint8_t *ptr, uint32_t len,
+    uint64_t prp1, uint64_t prp2)
+{
+    QEMUSGList qsg;
+    QEMUIOVector iov;
+    uint16_t status = NVME_SUCCESS;
+
+    trace_nvme_dma_read(prp1, prp2);
+
+    if (nvme_map_prp(&qsg, &iov, prp1, prp2, len, n)) {
+        return NVME_INVALID_FIELD | NVME_DNR;
+    }
+    if (qsg.nsg > 0) {
+        if (unlikely(dma_buf_write(ptr, len, &qsg))) {
+            trace_nvme_err_invalid_dma();
+            status = NVME_INVALID_FIELD | NVME_DNR;
+        }
+        qemu_sglist_destroy(&qsg);
+    } else {
+        if (unlikely(qemu_iovec_from_buf(&iov, 0, ptr, len) != len)) {
+            trace_nvme_err_invalid_dma();
+            status = NVME_INVALID_FIELD | NVME_DNR;
+        }
+        qemu_iovec_destroy(&iov);
+    }
+    return status;
+}
+
 static void nvme_post_cqes(void *opaque)
 {
     NvmeCQueue *cq = opaque;
@@ -492,17 +520,9 @@ static uint16_t nvme_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     return NVME_NO_COMPLETE;
 }
 
-static uint16_t nvme_io_cmd(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
+static uint16_t nvme_nvm_io_cmd(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
+    NvmeRequest *req)
 {
-    NvmeNamespace *ns;
-    uint32_t nsid = le32_to_cpu(cmd->nsid);
-
-    if (unlikely(nsid == 0 || nsid > n->num_namespaces)) {
-        trace_nvme_err_invalid_ns(nsid, n->num_namespaces);
-        return NVME_INVALID_NSID | NVME_DNR;
-    }
-
-    ns = &n->namespaces[nsid - 1];
     switch (cmd->opcode) {
     case NVME_CMD_FLUSH:
         return nvme_flush(n, ns, cmd, req);
@@ -515,6 +535,207 @@ static uint16_t nvme_io_cmd(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
         trace_nvme_err_invalid_opc(cmd->opcode);
         return NVME_INVALID_OPCODE | NVME_DNR;
     }
+}
+
+static bool nvme_kv_keys_equal(const NvmeKVKey *key1, const NvmeKVKey *key2)
+{
+    if (key1->len != key2->len) {
+        return false;
+    }
+    return 0 == memcmp(key1->key, key2->key, key1->len);
+}
+
+static void nvme_kv_remove_object(NvmeNamespace *ns, const NvmeKVKey *key)
+{
+    NvmeFsObj *obj, *next;
+    QLIST_FOREACH_SAFE(obj, &ns->fs_objects, node, next) {
+        if ((key != NULL) && !nvme_kv_keys_equal(key, &obj->key)) {
+            continue;
+        }
+
+        QLIST_REMOVE(obj, node);
+        g_free(obj->value);
+        g_free(obj);
+    }
+}
+
+static uint16_t nvme_kv_make_key(NvmeKvCmd *kv_cmd, NvmeKVKey *key)
+{
+    if (kv_cmd->key_length > NVME_KV_MAX_KEY_LENGTH) {
+        return NVME_INVALID_KEY_SIZE;
+    }
+    key->key_low = kv_cmd->key_low;
+    key->key_high = kv_cmd->key_high;
+    key->len = kv_cmd->key_length;
+    return NVME_SUCCESS;
+}
+
+static uint16_t nvme_kv_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
+    NvmeRequest *req)
+{
+    NvmeKvCmd *kv_cmd = (NvmeKvCmd *)cmd;
+    NvmeKVKey key;
+    uint16_t status = nvme_kv_make_key(kv_cmd, &key);
+    if (unlikely(status != NVME_SUCCESS)) {
+        return status;
+    }
+
+    // TODO: check store options, don't override if not wanted.
+    nvme_kv_remove_object(ns, &key);
+
+    uint8_t *data = g_malloc0(kv_cmd->value_size);
+    status = nvme_dma_write_prp(n, data, kv_cmd->value_size, kv_cmd->prp1, kv_cmd->prp2);
+    if (unlikely(status != NVME_SUCCESS)) {
+        printf("Failed write %d\n", (int)status);
+        g_free(data);
+        return status;
+    }
+
+    // Here, we should forward the call to the evssim, but until then, we just store the object in memory
+    NvmeFsObj *fs_obj = g_malloc0(sizeof(*fs_obj));
+    fs_obj->key = key;
+    fs_obj->value = data;
+    fs_obj->value_length = kv_cmd->value_size;
+    QLIST_INSERT_HEAD(&ns->fs_objects, fs_obj, node);
+
+    return NVME_SUCCESS;
+}
+
+static uint16_t nvme_kv_retreive(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
+    NvmeRequest *req)
+{
+    NvmeKvCmd *kv_cmd = (NvmeKvCmd *)cmd;
+
+    NvmeKVKey key;
+    uint16_t status = nvme_kv_make_key(kv_cmd, &key);
+    if (unlikely(status != NVME_SUCCESS)) {
+        return status;
+    }
+
+    // Here, we should receive the value using evssim, but until then, we just get this from memory
+    void *value = NULL;
+    uint32_t value_length = 0;
+
+    NvmeFsObj *obj;
+    QLIST_FOREACH(obj, &ns->fs_objects, node) {
+        if (nvme_kv_keys_equal(&key, &obj->key)) {
+            value = obj->value;
+            value_length = obj->value_length;
+            break;
+        }
+    }
+
+    if (value == NULL) {
+        return NVME_KEY_DOES_NOT_EXIST | NVME_DNR;
+    }
+
+    status = nvme_dma_read_prp(n, value, MIN(value_length, kv_cmd->value_size), kv_cmd->prp1, kv_cmd->prp2);
+    if (unlikely(status != NVME_SUCCESS)) {
+        printf("Failed write %d\n", (int)status);
+        return status;
+    }
+
+    req->cqe.result = value_length;
+    return NVME_SUCCESS;
+}
+
+static uint16_t nvme_kv_delete(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
+    NvmeRequest *req)
+{
+    NvmeKvCmd *kv_cmd = (NvmeKvCmd *)cmd;
+    NvmeKVKey key;
+    uint16_t status = nvme_kv_make_key(kv_cmd, &key);
+    if (unlikely(status != NVME_SUCCESS)) {
+        return status;
+    }
+
+    nvme_kv_remove_object(ns, &key);
+    return NVME_SUCCESS;
+}
+
+static uint16_t nvme_kv_list(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
+    NvmeRequest *req)
+{
+    NvmeKvCmd *kv_cmd = (NvmeKvCmd *)cmd;
+
+    NvmeKVKey key;
+    uint16_t status = nvme_kv_make_key(kv_cmd, &key);
+    if (unlikely(status != NVME_SUCCESS)) {
+        return status;
+    }
+
+    // First, calculate the required buffer size
+    if (kv_cmd->value_size < sizeof(uint32_t)) {
+        printf("Invalid size, must be at least 4\n");
+        return NVME_KEY_DOES_NOT_EXIST | NVME_DNR;
+    }
+
+    const uint32_t size_per_key = sizeof(NvmeKVKey);
+    const uint32_t max_keys_count = (kv_cmd->value_size - sizeof(uint32_t)) / size_per_key;
+
+    NvmeFsObj *obj;
+    uint32_t keys_count = 0;
+    QLIST_FOREACH(obj, &ns->fs_objects, node) {
+        keys_count++;
+    }
+    keys_count = MIN(keys_count, max_keys_count);
+
+    const uint32_t actual_buffer_size = sizeof(uint32_t) + (keys_count * size_per_key);
+    assert(actual_buffer_size < kv_cmd->value_size);
+
+    // Now, fill it on local buffer
+    NvmeKvListFormat *list_buf = g_malloc0(actual_buffer_size);
+    list_buf->keys_count = keys_count;
+    size_t i = 0;
+    QLIST_FOREACH(obj, &ns->fs_objects, node) {
+        list_buf->keys[i] = obj->key;
+        i++;
+    }
+
+    status = nvme_dma_read_prp(n, (void*)list_buf, actual_buffer_size, kv_cmd->prp1, kv_cmd->prp2);
+    g_free(list_buf);
+    if (unlikely(status != NVME_SUCCESS)) {
+        printf("Failed write %d\n", (int)status);
+        return status;
+    }
+
+    req->cqe.result = actual_buffer_size;
+    return NVME_SUCCESS;
+}
+
+static uint16_t nvme_kv_io_cmd(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
+    NvmeRequest *req)
+{
+    switch (cmd->opcode) {
+    case NVME_KV_CMD_STORE:
+        return nvme_kv_store(n, ns, cmd, req);
+    case NVME_KV_CMD_RETREIVE:
+        return nvme_kv_retreive(n, ns, cmd, req);
+    case NVME_KV_CMD_DELETE:
+        return nvme_kv_delete(n, ns, cmd, req);
+    case NVME_KV_CMD_LIST:
+        return nvme_kv_list(n, ns, cmd, req);
+    default:
+        printf("@@@@ Got cmd %d\n", cmd->opcode);
+        trace_nvme_err_invalid_opc(cmd->opcode);
+        return NVME_INVALID_OPCODE | NVME_DNR;
+    }
+}
+
+static uint16_t nvme_io_cmd(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
+{
+    NvmeNamespace *ns;
+    uint32_t nsid = le32_to_cpu(cmd->nsid);
+
+    if (unlikely(nsid == 0 || nsid > n->num_namespaces)) {
+        trace_nvme_err_invalid_ns(nsid, n->num_namespaces);
+        return NVME_INVALID_NSID | NVME_DNR;
+    }
+
+    ns = &n->namespaces[nsid - 1];
+    return n->feature.key_value_csi ?
+        nvme_kv_io_cmd(n, ns, cmd, req) :
+        nvme_nvm_io_cmd(n, ns, cmd, req);
 }
 
 static void nvme_free_sq(NvmeSQueue *sq, NvmeCtrl *n)
@@ -1699,14 +1920,22 @@ static void nvme_realize(PCIDevice *pci_dev, Error **errp)
         id_ns->ncap  = id_ns->nuse = id_ns->nsze =
             cpu_to_le64(n->ns_size >>
                 id_ns->lbaf[NVME_ID_NS_FLBAS_INDEX(ns->id_ns.flbas)].ds);
+
+        QLIST_INIT(&ns->fs_objects);
     }
 }
 
 static void nvme_exit(PCIDevice *pci_dev)
 {
+    uint32_t i;
     NvmeCtrl *n = NVME(pci_dev);
 
     nvme_clear_ctrl(n, true);
+    for (i = 0; i < n->num_namespaces; i++) {
+        NvmeNamespace *ns = &n->namespaces[i];
+        nvme_kv_remove_object(ns, NULL);
+    }
+
     g_free(n->namespaces);
     g_free(n->cq);
     g_free(n->sq);

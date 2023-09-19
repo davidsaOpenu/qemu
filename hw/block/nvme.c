@@ -570,6 +570,19 @@ static uint16_t nvme_kv_make_key(NvmeKvCmd *kv_cmd, NvmeKVKey *key)
     return NVME_SUCCESS;
 }
 
+static NvmeFsObj *nvme_kv_find_obj(NvmeNamespace *ns, NvmeKVKey *key)
+{
+    NvmeFsObj *obj;
+    QLIST_FOREACH(obj, &ns->fs_objects, node) {
+        if (nvme_kv_keys_equal(key, &obj->key)) {
+            return obj;
+        }
+    }
+
+    // Not found
+    return NULL;
+}
+
 static uint16_t nvme_kv_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     NvmeRequest *req)
 {
@@ -583,12 +596,16 @@ static uint16_t nvme_kv_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     // TODO: check store options, don't override if not wanted.
     nvme_kv_remove_object(ns, &key);
 
-    uint8_t *data = g_malloc0(kv_cmd->value_size);
-    status = nvme_dma_write_prp(n, data, kv_cmd->value_size, kv_cmd->prp1, kv_cmd->prp2);
-    if (unlikely(status != NVME_SUCCESS)) {
-        printf("Failed write %d\n", (int)status);
-        g_free(data);
-        return status;
+    uint8_t *data = NULL;
+
+    if (kv_cmd->value_size > 0) {
+        data = g_malloc0(kv_cmd->value_size);
+        status = nvme_dma_write_prp(n, data, kv_cmd->value_size, kv_cmd->prp1, kv_cmd->prp2);
+        if (unlikely(status != NVME_SUCCESS)) {
+            printf("Failed write %d\n", (int)status);
+            g_free(data);
+            return status;
+        }
     }
 
     // Here, we should forward the call to the evssim, but until then, we just store the object in memory
@@ -613,21 +630,13 @@ static uint16_t nvme_kv_retreive(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     }
 
     // Here, we should receive the value using evssim, but until then, we just get this from memory
-    void *value = NULL;
-    uint32_t value_length = 0;
-
-    NvmeFsObj *obj;
-    QLIST_FOREACH(obj, &ns->fs_objects, node) {
-        if (nvme_kv_keys_equal(&key, &obj->key)) {
-            value = obj->value;
-            value_length = obj->value_length;
-            break;
-        }
-    }
-
-    if (value == NULL) {
+    NvmeFsObj *obj = nvme_kv_find_obj(ns, &key);
+    if (obj == NULL) {
         return NVME_KEY_DOES_NOT_EXIST | NVME_DNR;
     }
+
+    void *value = obj->value;
+    uint32_t value_length = obj->value_length;
 
     status = nvme_dma_read_prp(n, value, MIN(value_length, kv_cmd->value_size), kv_cmd->prp1, kv_cmd->prp2);
     if (unlikely(status != NVME_SUCCESS)) {
@@ -673,21 +682,28 @@ static uint16_t nvme_kv_list(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     const uint32_t size_per_key = sizeof(NvmeKVKey);
     const uint32_t max_keys_count = (kv_cmd->value_size - sizeof(uint32_t)) / size_per_key;
 
-    NvmeFsObj *obj;
+    NvmeFsObj *first_obj = nvme_kv_find_obj(ns, &key);
+    if (!first_obj) {
+        // If the key wasn't found, start from the beginings.
+        first_obj = QLIST_FIRST(&ns->fs_objects);
+    }
+
+    NvmeFsObj *obj = NULL;
+
     uint32_t keys_count = 0;
-    QLIST_FOREACH(obj, &ns->fs_objects, node) {
+    for (obj = first_obj; obj; obj = QLIST_NEXT(obj, node)) {
         keys_count++;
     }
     keys_count = MIN(keys_count, max_keys_count);
 
     const uint32_t actual_buffer_size = sizeof(uint32_t) + (keys_count * size_per_key);
-    assert(actual_buffer_size < kv_cmd->value_size);
+    assert(actual_buffer_size <= kv_cmd->value_size);
 
     // Now, fill it on local buffer
     NvmeKvListFormat *list_buf = g_malloc0(actual_buffer_size);
     list_buf->keys_count = keys_count;
     size_t i = 0;
-    QLIST_FOREACH(obj, &ns->fs_objects, node) {
+    for (obj = first_obj; obj && i < max_keys_count; obj = QLIST_NEXT(obj, node)) {
         list_buf->keys[i] = obj->key;
         i++;
     }

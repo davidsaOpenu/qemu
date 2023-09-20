@@ -669,6 +669,15 @@ static uint16_t nvme_kv_delete(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     return NVME_SUCCESS;
 }
 
+#define PADDING_SIZE 4
+#define PADDING_MASK (PADDING_SIZE - 1)
+#define padded_key_len(len) ((len) + PADDING_MASK) & ~PADDING_MASK
+
+static uint32_t nvme_kv_list_key_len(NvmeKVKey *key)
+{
+    return padded_key_len(sizeof(uint16_t) + key->len);
+}
+
 static uint16_t nvme_kv_list(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     NvmeRequest *req)
 {
@@ -686,9 +695,6 @@ static uint16_t nvme_kv_list(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         return NVME_KEY_DOES_NOT_EXIST | NVME_DNR;
     }
 
-    const uint32_t size_per_key = sizeof(NvmeKVKey);
-    const uint32_t max_keys_count = (kv_cmd->value_size - sizeof(uint32_t)) / size_per_key;
-
     NvmeFsObj *first_obj = nvme_kv_find_obj(ns, &key);
     if (!first_obj) {
         // If the key wasn't found, start from the beginings.
@@ -697,32 +703,42 @@ static uint16_t nvme_kv_list(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 
     NvmeFsObj *obj = NULL;
 
+    // First, calculate the amount of keys and the required buffer size.
     uint32_t keys_count = 0;
+    uint32_t required_buffer_size = sizeof(uint32_t);
     for (obj = first_obj; obj; obj = QLIST_NEXT(obj, node)) {
-        keys_count++;
-    }
-    keys_count = MIN(keys_count, max_keys_count);
+        const uint32_t key_size = nvme_kv_list_key_len(&obj->key);
+        if ((required_buffer_size + key_size) > kv_cmd->value_size) {
+            // No more place
+            break;
+        }
 
-    const uint32_t actual_buffer_size = sizeof(uint32_t) + (keys_count * size_per_key);
-    assert(actual_buffer_size <= kv_cmd->value_size);
+        keys_count++;
+        required_buffer_size += key_size;
+    }
 
     // Now, fill it on local buffer
-    NvmeKvListFormat *list_buf = g_malloc0(actual_buffer_size);
-    list_buf->keys_count = keys_count;
-    size_t i = 0;
-    for (obj = first_obj; obj && i < max_keys_count; obj = QLIST_NEXT(obj, node)) {
-        list_buf->keys[i] = obj->key;
-        i++;
+    uint8_t *list_buf = g_malloc0(required_buffer_size);
+    *((uint32_t*)list_buf) = keys_count;
+    size_t current_offset = sizeof(uint32_t);
+    for (obj = first_obj; obj; obj = QLIST_NEXT(obj, node)) {
+        if ((current_offset + nvme_kv_list_key_len(&obj->key) > required_buffer_size)) {
+            break;
+        }
+
+        *(uint16_t *)(&list_buf[current_offset]) = obj->key.len;
+        memcpy(&list_buf[current_offset+sizeof(uint16_t)], obj->key.key, obj->key.len);
+        current_offset += nvme_kv_list_key_len(&obj->key);
     }
 
-    status = nvme_dma_read_prp(n, (void*)list_buf, actual_buffer_size, kv_cmd->prp1, kv_cmd->prp2);
+    status = nvme_dma_read_prp(n, (void*)list_buf, required_buffer_size, kv_cmd->prp1, kv_cmd->prp2);
     g_free(list_buf);
     if (unlikely(status != NVME_SUCCESS)) {
         printf("Failed write %d\n", (int)status);
         return status;
     }
 
-    req->cqe.result = actual_buffer_size;
+    req->cqe.result = required_buffer_size;
     return NVME_SUCCESS;
 }
 

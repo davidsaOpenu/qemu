@@ -68,10 +68,7 @@ typedef struct NvmeCQueue {
 
 #define NVME_KV_MAX_KEY_LENGTH (16)
 
-// The layout of this struct is the same as the layout of a single key
-// in the list command. For simplicity We allow len to be only 16 so each
-// key structure will have the same size.
-typedef struct __attribute__((packed)) NvmeKVKey {
+typedef struct NvmeKVKey {
     uint16_t len;
     union {
         uint8_t key[NVME_KV_MAX_KEY_LENGTH];
@@ -80,14 +77,7 @@ typedef struct __attribute__((packed)) NvmeKVKey {
             uint64_t key_high;
         };
     };
-
-    uint16_t pad;
 } NvmeKVKey;
-
-typedef struct NvmeKvListFormat {
-    uint32_t keys_count;
-    NvmeKVKey keys[0]; // The actual size is keys_count
-} NvmeKvListFormat;
 
 typedef struct NvmeFsObj {
     QLIST_ENTRY(NvmeFsObj) node;

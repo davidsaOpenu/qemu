@@ -635,13 +635,20 @@ static uint16_t nvme_kv_retreive(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         return NVME_KEY_DOES_NOT_EXIST | NVME_DNR;
     }
 
-    void *value = obj->value;
-    uint32_t value_length = obj->value_length;
+    if (kv_cmd->offset > obj->value_length) {
+        return NVME_INVALID_FIELD | NVME_DNR;
+    }
 
-    status = nvme_dma_read_prp(n, value, MIN(value_length, kv_cmd->value_size), kv_cmd->prp1, kv_cmd->prp2);
-    if (unlikely(status != NVME_SUCCESS)) {
-        printf("Failed write %d\n", (int)status);
-        return status;
+    void *data_start = ((uint8_t*)obj->value) + kv_cmd->offset;
+    const uint32_t value_length = obj->value_length - kv_cmd->offset;
+    const uint32_t actual_value_to_read = MIN(value_length, kv_cmd->value_size);
+
+    if (actual_value_to_read > 0) {
+        status = nvme_dma_read_prp(n, data_start, actual_value_to_read, kv_cmd->prp1, kv_cmd->prp2);
+        if (unlikely(status != NVME_SUCCESS)) {
+            printf("Failed read %d\n", (int)status);
+            return status;
+        }
     }
 
     req->cqe.result = value_length;

@@ -362,7 +362,8 @@ typedef struct NvmeKvCmd {
     uint8_t     key_length;
     uint8_t     store_options;
     uint16_t    rsvd11;
-    uint32_t    rsvd12[2];
+    uint32_t    offset;
+    uint32_t    rsvd13;
     uint64_t    key_high;
 } NvmeKvCmd;
 

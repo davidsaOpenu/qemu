@@ -229,6 +229,17 @@ void blk_io_limits_enable(BlockBackend *blk, const char *group);
 void blk_io_limits_update_group(BlockBackend *blk, const char *group);
 void blk_set_force_allow_inactivate(BlockBackend *blk);
 
+int blk_obj_write(BlockBackend *blk, const ObjKey *key,
+    const void *obj_data, uint32_t obj_size);
+int blk_obj_read(BlockBackend *blk, const ObjKey *key,
+    void *obj_data, uint32_t *obj_size, uint32_t offset);
+int blk_obj_delete(BlockBackend *blk, const ObjKey *key);
+int blk_obj_query(BlockBackend *blk, const ObjKey *key,
+    ObjInfo *info);
+int blk_obj_iter_init(BlockBackend *blk, const ObjKey *start_key,
+    ObjIterator **iter);
+void blk_obj_iter_finalize(BlockBackend *blk, ObjIterator *iter);
+
 void blk_register_buf(BlockBackend *blk, void *host, size_t size);
 void blk_unregister_buf(BlockBackend *blk, void *host);
 

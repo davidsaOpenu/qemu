@@ -2202,6 +2202,71 @@ static void blk_root_drained_end(BdrvChild *child)
     }
 }
 
+int blk_obj_write(BlockBackend *blk, const ObjKey *key,
+    const void *obj_data, uint32_t obj_size)
+{
+    BlockDriverState *bs = blk_bs(blk);
+    if (!bs->drv->bdrv_obj_write) {
+        return -EINVAL;
+    }
+
+    return bs->drv->bdrv_obj_write(bs, key, obj_data, obj_size);
+}
+
+
+int blk_obj_read(BlockBackend *blk, const ObjKey *key,
+    void *obj_data, uint32_t *obj_size, uint32_t offset)
+{
+    BlockDriverState *bs = blk_bs(blk);
+    if (!bs->drv->bdrv_obj_read) {
+        return -EINVAL;
+    }
+
+    return bs->drv->bdrv_obj_read(bs, key, obj_data, obj_size, offset);
+}
+
+int blk_obj_delete(BlockBackend *blk, const ObjKey *key)
+{
+    BlockDriverState *bs = blk_bs(blk);
+    if (!bs->drv->bdrv_obj_delete) {
+        return -EINVAL;
+    }
+
+    return bs->drv->bdrv_obj_delete(bs, key);
+}
+
+int blk_obj_query(BlockBackend *blk, const ObjKey *key,
+    ObjInfo *info)
+{
+    BlockDriverState *bs = blk_bs(blk);
+    if (!bs->drv->bdrv_obj_query) {
+        return -EINVAL;
+    }
+
+    return bs->drv->bdrv_obj_query(bs, key, info);
+}
+
+int blk_obj_iter_init(BlockBackend *blk, const ObjKey *start_key,
+    ObjIterator **iter)
+{
+    BlockDriverState *bs = blk_bs(blk);
+    if (!bs->drv->bdrv_obj_iter_init) {
+        return -EINVAL;
+    }
+
+    return bs->drv->bdrv_obj_iter_init(bs, start_key, iter);
+}
+
+void blk_obj_iter_finalize(BlockBackend *blk, ObjIterator *iter)
+{
+    BlockDriverState *bs = blk_bs(blk);
+    if (!bs->drv->bdrv_obj_iter_finalize) {
+        return;
+    }
+
+    bs->drv->bdrv_obj_iter_finalize(bs, iter);
+}
+
 void blk_register_buf(BlockBackend *blk, void *host, size_t size)
 {
     bdrv_register_buf(blk_bs(blk), host, size);

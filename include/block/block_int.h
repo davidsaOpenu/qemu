@@ -82,6 +82,24 @@ typedef struct BdrvTrackedRequest {
     struct BdrvTrackedRequest *waiting_for;
 } BdrvTrackedRequest;
 
+#define MAX_OBJ_KEY_LENGTH (16)
+
+typedef struct ObjKey {
+    uint8_t key[MAX_OBJ_KEY_LENGTH];
+    uint8_t len;
+} ObjKey;
+
+typedef struct ObjInfo {
+    ObjKey key;
+    uint32_t length;
+} ObjInfo;
+
+
+typedef struct ObjIterator ObjIterator;
+struct ObjIterator {
+    ObjInfo *(*next)(ObjIterator *it);
+};
+
 struct BlockDriver {
     const char *format_name;
     int instance_size;
@@ -203,6 +221,19 @@ struct BlockDriver {
         int64_t offset, int bytes, BdrvRequestFlags flags);
     int coroutine_fn (*bdrv_co_pdiscard)(BlockDriverState *bs,
         int64_t offset, int bytes);
+
+    /* Obj io. Should be implemented as aio or coroutine_fn.  */
+    int (*bdrv_obj_write)(BlockDriverState *bs, const ObjKey *key,
+        const void *obj_data, uint32_t obj_size);
+    int (*bdrv_obj_read)(BlockDriverState *bs, const ObjKey *key,
+        void *obj_data, uint32_t *obj_size,
+        uint32_t offset);
+    int (*bdrv_obj_delete)(BlockDriverState *bs, const ObjKey *key);
+    int (*bdrv_obj_query)(BlockDriverState *bs, const ObjKey *key,
+        ObjInfo *info);
+    int (*bdrv_obj_iter_init)(BlockDriverState *bs, const ObjKey *start_key,
+        ObjIterator **iter);
+    void (*bdrv_obj_iter_finalize)(BlockDriverState *bs, ObjIterator *iter);
 
     /*
      * Building block for bdrv_block_status[_above] and

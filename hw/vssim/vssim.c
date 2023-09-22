@@ -69,6 +69,14 @@ typedef struct part_map{
     UT_hash_handle hh; /* makes this structure hashable */
 } part_map;
 
+
+typedef struct FsObj {
+    QLIST_ENTRY(FsObj) node;
+
+    ObjInfo info;
+    void *data;
+} FsObj;
+
 /**
  * This structure is initialized during the call to open,
  * and we get its instance (as a parameter) in each of our 'driver' functions.
@@ -82,6 +90,10 @@ typedef struct BDRVVSSIMState {
 
     uint64_t size; /* size will represent the max size of an object / length of the sector based storage*/
     bool simulator;
+
+    // Objects are held in memory for now only for simplicity reasons.
+    // They should be inside the simulator
+    QLIST_HEAD(, FsObj) fs_objects;
 } BDRVVSSIMState;
 
 static QemuOptsList runtime_opts = {
@@ -297,15 +309,21 @@ static int vssim_open(BlockDriverState *bs, QDict * dict, int flags,
         INIT_OBJ_STRATEGY(); // TODO: init only when necessary (aka only when using object strategy)
     }
 
+    QLIST_INIT(&s->fs_objects);
+
     trace_vssim_initialized(bs, s->size, s->memory); // TODO: trace it only when using sector strategy
 
     return 0;
 }
 
+static void vssim_remove_object(BDRVVSSIMState *s, const ObjKey *key);
+
 static void vssim_close(BlockDriverState *bs)
 {
     BDRVVSSIMState *s = bs->opaque;
     trace_vssim_close(bs);
+
+    vssim_remove_object(s, NULL);
 
     // Destruct FTL
     if (s->simulator) {
@@ -439,6 +457,155 @@ static int coroutine_fn vssim_co_pwritev(BlockDriverState *bs, uint64_t offset,
     return 0;
 }
 
+static bool evssim_obj_keys_equal(const ObjKey *key1, const ObjKey *key2)
+{
+    if (key1->len != key2->len) {
+        return false;
+    }
+    return 0 == memcmp(key1->key, key2->key, key1->len);
+}
+
+static void vssim_remove_object(BDRVVSSIMState *s, const ObjKey *key)
+{
+    FsObj *obj, *next;
+    QLIST_FOREACH_SAFE(obj, &s->fs_objects, node, next) {
+        if ((key != NULL) && !evssim_obj_keys_equal(key, &obj->info.key)) {
+            continue;
+        }
+
+        QLIST_REMOVE(obj, node);
+        g_free(obj->data);
+        g_free(obj);
+    }
+}
+
+static FsObj *vssim_kv_find_obj(BDRVVSSIMState *s, const ObjKey *key)
+{
+    FsObj *obj;
+    QLIST_FOREACH(obj, &s->fs_objects, node) {
+        if (evssim_obj_keys_equal(key, &obj->info.key)) {
+            return obj;
+        }
+    }
+
+    // Not found
+    return NULL;
+}
+
+static int vssim_obj_write(BlockDriverState *bs, const ObjKey *key,
+    const void *obj_data, uint32_t obj_size)
+{
+    BDRVVSSIMState *s = bs->opaque;
+
+    vssim_remove_object(s, key);
+
+    FsObj *fs_obj = g_malloc0(sizeof(*fs_obj));
+    fs_obj->info.key = *key;
+    fs_obj->info.length = obj_size;
+    fs_obj->data = g_malloc0(obj_size);
+    if (obj_size > 0) {
+        memcpy(fs_obj->data, obj_data, obj_size);
+    }
+    QLIST_INSERT_HEAD(&s->fs_objects, fs_obj, node);
+
+    printf("VSSIM write obj\n");
+    return 0;
+}
+
+static int vssim_obj_read(BlockDriverState *bs, const ObjKey *key,
+    void *obj_data, uint32_t *obj_size, uint32_t offset)
+{
+    BDRVVSSIMState *s = bs->opaque;
+
+    // Here, we should receive the value from the simulator, but until then, we just get
+    // this from memory
+    FsObj *obj = vssim_kv_find_obj(s, key);
+    if (obj == NULL) {
+        return -EIO;
+    }
+
+    if (offset > obj->info.length) {
+        return -EIO;
+    }
+
+    const uint32_t length = obj->info.length - offset;
+    const uint32_t length_to_read = MIN(length, *obj_size);
+
+    if (length_to_read > 0) {
+        void *data_start = ((uint8_t*)obj->data) + offset;
+        memcpy(obj_data, data_start, length_to_read);
+    }
+
+    *obj_size = length_to_read;
+    return 0;
+}
+
+static int vssim_obj_delete(BlockDriverState *bs, const ObjKey *key)
+{
+    BDRVVSSIMState *s = bs->opaque;
+
+    vssim_remove_object(s, key);
+    return 0;
+}
+
+static int vssim_obj_query(BlockDriverState *bs, const ObjKey *key,
+    ObjInfo *info)
+{
+    BDRVVSSIMState *s = bs->opaque;
+
+    FsObj *obj = vssim_kv_find_obj(s, key);
+    if (obj == NULL) {
+        return -EIO;
+    }
+    *info = obj->info;
+    return 0;
+}
+
+typedef struct VssimObjIterator {
+    ObjIterator base;
+    FsObj *current;
+} VssimObjIterator;
+
+static ObjInfo *vssim_iter_next(ObjIterator *iter)
+{
+    VssimObjIterator *vssim_iter = (VssimObjIterator*)iter;
+    if (vssim_iter->current == NULL) {
+        return NULL;
+    }
+
+    FsObj *current = vssim_iter->current;
+    if (!current) {
+        return NULL;
+    } else {
+        vssim_iter->current = QLIST_NEXT(current, node);
+        return &current->info;
+    }
+}
+
+static int vssim_obj_iter_init(BlockDriverState *bs, const ObjKey *start_key,
+    ObjIterator **iter)
+{
+    BDRVVSSIMState *s = bs->opaque;
+
+    VssimObjIterator *vssim_iter = g_malloc0(sizeof(*vssim_iter));
+    vssim_iter->base.next = vssim_iter_next;
+
+    FsObj *first_obj = vssim_kv_find_obj(s, start_key);
+    if (!first_obj) {
+        // If the key wasn't found, start from the beginnings.
+        first_obj = QLIST_FIRST(&s->fs_objects);
+    }
+    vssim_iter->current = first_obj;
+
+    *iter = (ObjIterator*)vssim_iter;
+    return 0;
+}
+
+static void vssim_obj_iter_finalize(BlockDriverState *bs, ObjIterator *iter)
+{
+    g_free(iter);
+}
+
 static int64_t vssim_getlength(BlockDriverState *bs)
 {
     BDRVVSSIMState *s = bs->opaque;
@@ -451,6 +618,12 @@ BlockDriver bdrv_vssim = {
     .bdrv_open              = vssim_open,
     .bdrv_co_preadv         = vssim_co_preadv,
     .bdrv_co_pwritev        = vssim_co_pwritev,
+    .bdrv_obj_write         = vssim_obj_write,
+    .bdrv_obj_read          = vssim_obj_read,
+    .bdrv_obj_delete        = vssim_obj_delete,
+    .bdrv_obj_query         = vssim_obj_query,
+    .bdrv_obj_iter_init     = vssim_obj_iter_init,
+    .bdrv_obj_iter_finalize = vssim_obj_iter_finalize,
     .bdrv_close             = vssim_close,
     .bdrv_getlength         = vssim_getlength,
     .bdrv_needs_filename    = false,

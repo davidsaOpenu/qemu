@@ -537,64 +537,28 @@ static uint16_t nvme_nvm_io_cmd(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     }
 }
 
-static bool nvme_kv_keys_equal(const NvmeKVKey *key1, const NvmeKVKey *key2)
+static uint16_t nvme_kv_make_key(NvmeKvCmd *kv_cmd, ObjKey *key)
 {
-    if (key1->len != key2->len) {
-        return false;
-    }
-    return 0 == memcmp(key1->key, key2->key, key1->len);
-}
-
-static void nvme_kv_remove_object(NvmeNamespace *ns, const NvmeKVKey *key)
-{
-    NvmeFsObj *obj, *next;
-    QLIST_FOREACH_SAFE(obj, &ns->fs_objects, node, next) {
-        if ((key != NULL) && !nvme_kv_keys_equal(key, &obj->key)) {
-            continue;
-        }
-
-        QLIST_REMOVE(obj, node);
-        g_free(obj->value);
-        g_free(obj);
-    }
-}
-
-static uint16_t nvme_kv_make_key(NvmeKvCmd *kv_cmd, NvmeKVKey *key)
-{
-    if (kv_cmd->key_length > NVME_KV_MAX_KEY_LENGTH) {
+    if (kv_cmd->key_length > MAX_OBJ_KEY_LENGTH) {
         return NVME_INVALID_KEY_SIZE;
     }
-    key->key_low = kv_cmd->key_low;
-    key->key_high = kv_cmd->key_high;
+
+    const uint64_t key_low = kv_cmd->key_low, key_high = kv_cmd->key_high;
+    memcpy(&key->key[0], &key_low, sizeof(key_low));
+    memcpy(&key->key[sizeof(key_low)], &key_high, sizeof(key_high));
     key->len = kv_cmd->key_length;
     return NVME_SUCCESS;
-}
-
-static NvmeFsObj *nvme_kv_find_obj(NvmeNamespace *ns, NvmeKVKey *key)
-{
-    NvmeFsObj *obj;
-    QLIST_FOREACH(obj, &ns->fs_objects, node) {
-        if (nvme_kv_keys_equal(key, &obj->key)) {
-            return obj;
-        }
-    }
-
-    // Not found
-    return NULL;
 }
 
 static uint16_t nvme_kv_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     NvmeRequest *req)
 {
     NvmeKvCmd *kv_cmd = (NvmeKvCmd *)cmd;
-    NvmeKVKey key;
+    ObjKey key;
     uint16_t status = nvme_kv_make_key(kv_cmd, &key);
     if (unlikely(status != NVME_SUCCESS)) {
         return status;
     }
-
-    // TODO: check store options, don't override if not wanted.
-    nvme_kv_remove_object(ns, &key);
 
     uint8_t *data = NULL;
 
@@ -602,18 +566,15 @@ static uint16_t nvme_kv_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         data = g_malloc0(kv_cmd->value_size);
         status = nvme_dma_write_prp(n, data, kv_cmd->value_size, kv_cmd->prp1, kv_cmd->prp2);
         if (unlikely(status != NVME_SUCCESS)) {
-            printf("Failed write %d\n", (int)status);
             g_free(data);
             return status;
         }
     }
 
-    // Here, we should forward the call to the evssim, but until then, we just store the object in memory
-    NvmeFsObj *fs_obj = g_malloc0(sizeof(*fs_obj));
-    fs_obj->key = key;
-    fs_obj->value = data;
-    fs_obj->value_length = kv_cmd->value_size;
-    QLIST_INSERT_HEAD(&ns->fs_objects, fs_obj, node);
+    int ret = blk_obj_write(n->conf.blk, &key, data, kv_cmd->value_size);
+    if (ret < 0) {
+        return NVME_DATA_TRAS_ERROR | NVME_DNR;
+    }
 
     return NVME_SUCCESS;
 }
@@ -623,35 +584,39 @@ static uint16_t nvme_kv_retreive(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 {
     NvmeKvCmd *kv_cmd = (NvmeKvCmd *)cmd;
 
-    NvmeKVKey key;
+    ObjKey key;
     uint16_t status = nvme_kv_make_key(kv_cmd, &key);
     if (unlikely(status != NVME_SUCCESS)) {
         return status;
     }
 
-    // Here, we should receive the value using evssim, but until then, we just get this from memory
-    NvmeFsObj *obj = nvme_kv_find_obj(ns, &key);
-    if (obj == NULL) {
+    ObjInfo info;
+    int ret = blk_obj_query(n->conf.blk, &key, &info);
+    if (ret < 0) {
         return NVME_KEY_DOES_NOT_EXIST | NVME_DNR;
     }
 
-    if (kv_cmd->offset > obj->value_length) {
+    if (kv_cmd->offset > info.length) {
         return NVME_INVALID_FIELD | NVME_DNR;
     }
 
-    void *data_start = ((uint8_t*)obj->value) + kv_cmd->offset;
-    const uint32_t value_length = obj->value_length - kv_cmd->offset;
-    const uint32_t actual_value_to_read = MIN(value_length, kv_cmd->value_size);
+    // Allocate local buffer
+    uint32_t data_size = kv_cmd->value_size;
+    void *data = g_malloc(data_size); // TODO: malloc can fail?
+    ret = blk_obj_read(n->conf.blk, &key, data, &data_size,
+        kv_cmd->offset);
+    if (ret < 0) {
+        return NVME_DATA_TRAS_ERROR | NVME_DNR;
+    }
 
-    if (actual_value_to_read > 0) {
-        status = nvme_dma_read_prp(n, data_start, actual_value_to_read, kv_cmd->prp1, kv_cmd->prp2);
+    if (data_size > 0) {
+        status = nvme_dma_read_prp(n, data, data_size, kv_cmd->prp1, kv_cmd->prp2);
         if (unlikely(status != NVME_SUCCESS)) {
-            printf("Failed read %d\n", (int)status);
             return status;
         }
     }
 
-    req->cqe.result = value_length;
+    req->cqe.result = data_size;
     return NVME_SUCCESS;
 }
 
@@ -659,13 +624,17 @@ static uint16_t nvme_kv_delete(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     NvmeRequest *req)
 {
     NvmeKvCmd *kv_cmd = (NvmeKvCmd *)cmd;
-    NvmeKVKey key;
+    ObjKey key;
     uint16_t status = nvme_kv_make_key(kv_cmd, &key);
     if (unlikely(status != NVME_SUCCESS)) {
         return status;
     }
 
-    nvme_kv_remove_object(ns, &key);
+    int ret = blk_obj_delete(n->conf.blk, &key);
+    if (ret < 0) {
+        return NVME_DATA_TRAS_ERROR | NVME_DNR;
+    }
+
     return NVME_SUCCESS;
 }
 
@@ -673,9 +642,73 @@ static uint16_t nvme_kv_delete(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 #define PADDING_MASK (PADDING_SIZE - 1)
 #define padded_key_len(len) ((len) + PADDING_MASK) & ~PADDING_MASK
 
-static uint32_t nvme_kv_list_key_len(NvmeKVKey *key)
+static uint32_t nvme_kv_list_key_len(const ObjKey *key)
 {
     return padded_key_len(sizeof(uint16_t) + key->len);
+}
+
+static uint16_t nvme_kv_list_info(NvmeCtrl *n, const ObjKey *key,
+    uint32_t max_buffer_size, uint32_t *keys_count,
+    uint32_t *required_buffer_size)
+{
+    if (max_buffer_size < sizeof(uint32_t)) {
+        return NVME_KEY_DOES_NOT_EXIST | NVME_DNR;
+    }
+
+    ObjIterator *iter = NULL;
+    int ret = blk_obj_iter_init(n->conf.blk, key, &iter);
+    if (ret < 0) {
+        return NVME_DATA_TRAS_ERROR | NVME_DNR;
+    }
+
+    *keys_count = 0;
+    *required_buffer_size = sizeof(uint32_t);
+
+    ObjInfo *info = iter->next(iter);
+    while (info) {
+        const uint32_t key_size = nvme_kv_list_key_len(&info->key);
+        if ((*required_buffer_size + key_size) > max_buffer_size) {
+            // No more place
+            break;
+        }
+
+        *keys_count += 1;
+        *required_buffer_size += key_size;
+
+        info = iter->next(iter);
+    }
+
+    blk_obj_iter_finalize(n->conf.blk, iter);
+    return NVME_SUCCESS;
+}
+
+static uint16_t nvme_kv_fill_list_buffer(NvmeCtrl *n, const ObjKey *key,
+    uint8_t *buf, uint32_t buf_size,
+    uint32_t keys_count)
+{
+    ObjIterator *iter = NULL;
+    int ret = blk_obj_iter_init(n->conf.blk, key, &iter);
+    if (ret < 0) {
+        return NVME_DATA_TRAS_ERROR | NVME_DNR;
+    }
+
+    *((uint32_t*)buf) = keys_count;
+    size_t current_offset = sizeof(uint32_t);
+
+    ObjInfo *info = iter->next(iter);
+    uint32_t i = 0;
+    while (info && i < keys_count) {
+        const ObjKey *key = &info->key;
+        *(uint16_t *)(&buf[current_offset]) = key->len;
+        memcpy(&buf[current_offset+sizeof(uint16_t)], key->key, key->len);
+        current_offset += nvme_kv_list_key_len(key);
+
+        info = iter->next(iter);
+        i++;
+    }
+
+    blk_obj_iter_finalize(n->conf.blk, iter);
+    return NVME_SUCCESS;
 }
 
 static uint16_t nvme_kv_list(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
@@ -683,58 +716,34 @@ static uint16_t nvme_kv_list(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 {
     NvmeKvCmd *kv_cmd = (NvmeKvCmd *)cmd;
 
-    NvmeKVKey key;
+    ObjKey key;
     uint16_t status = nvme_kv_make_key(kv_cmd, &key);
     if (unlikely(status != NVME_SUCCESS)) {
         return status;
     }
 
-    // First, calculate the required buffer size
-    if (kv_cmd->value_size < sizeof(uint32_t)) {
-        printf("Invalid size, must be at least 4\n");
-        return NVME_KEY_DOES_NOT_EXIST | NVME_DNR;
-    }
-
-    NvmeFsObj *first_obj = nvme_kv_find_obj(ns, &key);
-    if (!first_obj) {
-        // If the key wasn't found, start from the beginings.
-        first_obj = QLIST_FIRST(&ns->fs_objects);
-    }
-
-    NvmeFsObj *obj = NULL;
-
-    // First, calculate the amount of keys and the required buffer size.
-    uint32_t keys_count = 0;
-    uint32_t required_buffer_size = sizeof(uint32_t);
-    for (obj = first_obj; obj; obj = QLIST_NEXT(obj, node)) {
-        const uint32_t key_size = nvme_kv_list_key_len(&obj->key);
-        if ((required_buffer_size + key_size) > kv_cmd->value_size) {
-            // No more place
-            break;
-        }
-
-        keys_count++;
-        required_buffer_size += key_size;
-    }
-
-    // Now, fill it on local buffer
-    uint8_t *list_buf = g_malloc0(required_buffer_size);
-    *((uint32_t*)list_buf) = keys_count;
-    size_t current_offset = sizeof(uint32_t);
-    for (obj = first_obj; obj; obj = QLIST_NEXT(obj, node)) {
-        if ((current_offset + nvme_kv_list_key_len(&obj->key) > required_buffer_size)) {
-            break;
-        }
-
-        *(uint16_t *)(&list_buf[current_offset]) = obj->key.len;
-        memcpy(&list_buf[current_offset+sizeof(uint16_t)], obj->key.key, obj->key.len);
-        current_offset += nvme_kv_list_key_len(&obj->key);
-    }
-
-    status = nvme_dma_read_prp(n, (void*)list_buf, required_buffer_size, kv_cmd->prp1, kv_cmd->prp2);
-    g_free(list_buf);
+    // Calculate list info
+    uint32_t keys_count, required_buffer_size;
+    status = nvme_kv_list_info(n, &key, kv_cmd->value_size,
+        &keys_count, &required_buffer_size);
     if (unlikely(status != NVME_SUCCESS)) {
-        printf("Failed write %d\n", (int)status);
+        return status;
+    }
+
+    // Fill it on local buffer
+    uint8_t *buf = g_malloc0(required_buffer_size);
+    status = nvme_kv_fill_list_buffer(n, &key, buf, required_buffer_size,
+        keys_count);
+    if (unlikely(status != NVME_SUCCESS)) {
+        g_free(buf);
+        return status;
+    }
+
+    // Return the buffer to the user
+    status = nvme_dma_read_prp(n, (void*)buf, required_buffer_size,
+        kv_cmd->prp1, kv_cmd->prp2);
+    g_free(buf);
+    if (unlikely(status != NVME_SUCCESS)) {
         return status;
     }
 
@@ -755,7 +764,6 @@ static uint16_t nvme_kv_io_cmd(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     case NVME_KV_CMD_LIST:
         return nvme_kv_list(n, ns, cmd, req);
     default:
-        printf("@@@@ Got cmd %d\n", cmd->opcode);
         trace_nvme_err_invalid_opc(cmd->opcode);
         return NVME_INVALID_OPCODE | NVME_DNR;
     }
@@ -1959,22 +1967,14 @@ static void nvme_realize(PCIDevice *pci_dev, Error **errp)
         id_ns->ncap  = id_ns->nuse = id_ns->nsze =
             cpu_to_le64(n->ns_size >>
                 id_ns->lbaf[NVME_ID_NS_FLBAS_INDEX(ns->id_ns.flbas)].ds);
-
-        QLIST_INIT(&ns->fs_objects);
     }
 }
 
 static void nvme_exit(PCIDevice *pci_dev)
 {
-    uint32_t i;
     NvmeCtrl *n = NVME(pci_dev);
 
     nvme_clear_ctrl(n, true);
-    for (i = 0; i < n->num_namespaces; i++) {
-        NvmeNamespace *ns = &n->namespaces[i];
-        nvme_kv_remove_object(ns, NULL);
-    }
-
     g_free(n->namespaces);
     g_free(n->cq);
     g_free(n->sq);

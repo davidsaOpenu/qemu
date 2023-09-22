@@ -66,34 +66,8 @@ typedef struct NvmeCQueue {
     QTAILQ_HEAD(event_queue, AsyncEvent) event_queue;
 } NvmeCQueue;
 
-#define NVME_KV_MAX_KEY_LENGTH (16)
-
-typedef struct NvmeKVKey {
-    uint16_t len;
-    union {
-        uint8_t key[NVME_KV_MAX_KEY_LENGTH];
-        struct {
-            uint64_t key_low;
-            uint64_t key_high;
-        };
-    };
-} NvmeKVKey;
-
-typedef struct NvmeFsObj {
-    QLIST_ENTRY(NvmeFsObj) node;
-
-	NvmeKVKey key;
-
-	void *value;
-	uint32_t value_length;
-} NvmeFsObj;
-
 typedef struct NvmeNamespace {
     NvmeIdNs        id_ns;
-
-    // Objects are held in memory for now only for simplicity reasons.
-    // They should be stored inside the eVSSIM.
-    QLIST_HEAD(, NvmeFsObj) fs_objects;
 } NvmeNamespace;
 
 #define TYPE_NVME "nvme"

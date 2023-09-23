@@ -265,6 +265,7 @@ enum NvmeKvIoCommands {
     NVME_KV_CMD_RETREIVE        = 0x02,
     NVME_KV_CMD_LIST            = 0x06,
     NVME_KV_CMD_DELETE          = 0x10,
+    NVME_KV_CMD_EXIST		= 0x14,
 };
 
 typedef struct NvmeDeleteQ {

@@ -742,6 +742,26 @@ static uint16_t nvme_kv_list(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     return NVME_SUCCESS;
 }
 
+static uint16_t nvme_kv_exist(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
+    NvmeRequest *req)
+{
+    NvmeKvCmd *kv_cmd = (NvmeKvCmd *)cmd;
+    NvmeKVKey key;
+    uint16_t status = nvme_kv_make_key(kv_cmd, &key);
+    if (unlikely(status != NVME_SUCCESS)) {
+        return status;
+    }
+    // Here, we should forward the call to the evssim, but until then we check the qemu hosted key list
+    NvmeFsObj *obj = nvme_kv_find_obj(ns, &key);
+    if (!obj) {
+        req->cqe.result = NVME_KEY_DOES_NOT_EXIST;
+    }
+    else
+    	req->cqe.result = 0;
+  
+    return NVME_SUCCESS;
+}
+
 static uint16_t nvme_kv_io_cmd(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     NvmeRequest *req)
 {
@@ -754,6 +774,8 @@ static uint16_t nvme_kv_io_cmd(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         return nvme_kv_delete(n, ns, cmd, req);
     case NVME_KV_CMD_LIST:
         return nvme_kv_list(n, ns, cmd, req);
+    case NVME_KV_CMD_EXIST:
+    	return nvme_kv_exist(n, ns, cmd, req);
     default:
         printf("@@@@ Got cmd %d\n", cmd->opcode);
         trace_nvme_err_invalid_opc(cmd->opcode);

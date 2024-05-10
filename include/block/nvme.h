@@ -260,6 +260,14 @@ enum NvmeIoCommands {
     NVME_CMD_DSM                = 0x09,
 };
 
+enum NvmeKvIoCommands {
+    NVME_KV_CMD_STORE           = 0x01,
+    NVME_KV_CMD_RETREIVE        = 0x02,
+    NVME_KV_CMD_LIST            = 0x06,
+    NVME_KV_CMD_DELETE          = 0x10,
+    NVME_KV_CMD_EXIST		= 0x14,
+};
+
 typedef struct NvmeDeleteQ {
     uint8_t     opcode;
     uint8_t     flags;
@@ -341,6 +349,24 @@ typedef struct NvmeRwCmd {
     uint16_t    apptag;
     uint16_t    appmask;
 } NvmeRwCmd;
+
+typedef struct NvmeKvCmd {
+    uint8_t     opcode;
+    uint8_t     flags;
+    uint16_t    cid;
+    uint32_t    nsid;
+    uint64_t    key_low;
+    uint64_t    mptr;
+    uint64_t    prp1;
+    uint64_t    prp2;
+    uint32_t    value_size;
+    uint8_t     key_length;
+    uint8_t     store_options;
+    uint16_t    rsvd11;
+    uint32_t    offset;
+    uint32_t    rsvd13;
+    uint64_t    key_high;
+} NvmeKvCmd;
 
 enum {
     NVME_RW_LR                  = 1 << 15,
@@ -441,6 +467,8 @@ enum NvmeStatusCodes {
     NVME_CAP_EXCEEDED           = 0x0081,
     NVME_NS_NOT_READY           = 0x0082,
     NVME_NS_RESV_CONFLICT       = 0x0083,
+    NVME_INVALID_KEY_SIZE       = 0x0086,
+    NVME_KEY_DOES_NOT_EXIST     = 0x0087,
     NVME_INVALID_CQID           = 0x0100,
     NVME_INVALID_QID            = 0x0101,
     NVME_MAX_QSIZE_EXCEEDED     = 0x0102,

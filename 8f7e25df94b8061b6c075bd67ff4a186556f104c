@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "unresolved": true,
+      "key": {
+        "uuid": "0e451ef7_a200e4c4",
+        "filename": "hw/block/nvme.c",
+        "patchSetId": 2
+      },
+      "lineNbr": 500,
+      "author": {
+        "id": 1007990
+      },
+      "writtenOn": "2024-05-10T02:31:13Z",
+      "side": 0,
+      "message": "Why this one was removed?",
+      "revId": "8f7e25df94b8061b6c075bd67ff4a186556f104c",
+      "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735"
+    }
+  ]
+}

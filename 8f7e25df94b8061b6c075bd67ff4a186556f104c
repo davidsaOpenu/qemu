@@ -1,4 +1,22 @@
 {
-  "comments": [],
+  "comments": [
+    {
+      "unresolved": true,
+      "key": {
+        "uuid": "eff12f8c_ea35520e",
+        "filename": "include/block/nvme.h",
+        "patchSetId": 3
+      },
+      "lineNbr": 633,
+      "author": {
+        "id": 1007990
+      },
+      "writtenOn": "2024-05-10T06:33:14Z",
+      "side": 1,
+      "message": "@davidsa@openu.ac.il please check the attribution to the struct NvmeFeatureVal again",
+      "revId": "8f7e25df94b8061b6c075bd67ff4a186556f104c",
+      "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735"
+    }
+  ],
   "submitRequirementResults": []
 }

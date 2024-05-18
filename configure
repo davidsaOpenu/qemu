@@ -1978,9 +1978,9 @@ fi
 
 ## VSSIM
 QEMU_CFLAGS="-D VSSIM_NEXTGEN_BUILD_SYSTEM $QEMU_CFLAGS"
-QEMU_INCLUDES="-I/opt/libwebsockets/include $QEMU_INCLUDES"
+QEMU_INCLUDES="-I/opt/libwebsockets/include -I\$(SRC_PATH)/hw/vssim/simulator/osc-osd $QEMU_INCLUDES"
 LDFLAGS="-L/opt/libwebsockets/lib $LDFLAGS"
-LIBS="-lwebsockets $LIBS"
+LIBS="-lwebsockets -lsqlite3 $LIBS"
 
 # Configure optional vssim links
 if test "$vssim" = "yes" ; then
@@ -1988,6 +1988,8 @@ if test "$vssim" = "yes" ; then
     LIBS="-ljson-c $LIBS"
     vssim_source="$source_path/../simulator/eVSSIM"
     vssim_target="$source_path/hw/vssim/simulator"
+    symlink "$vssim_source/osc-osd" "$vssim_target/osc-osd"
+    make -C "$vssim_target/osc-osd/osd-target" osd-schema.c
     symlink "$vssim_source/SSD_MODULE/ssd_io_manager.h" "$vssim_target/ssd_io_manager.h"
     symlink "$vssim_source/SSD_MODULE/ssd_io_manager.c" "$vssim_target/ssd_io_manager.c"
     symlink "$vssim_source/SSD_MODULE/ssd_log_manager.h" "$vssim_target/ssd_log_manager.h"
@@ -1999,7 +2001,7 @@ if test "$vssim" = "yes" ; then
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_sect_strategy.h" "$vssim_target/ftl_sect_strategy.h"
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_sect_strategy.c" "$vssim_target/ftl_sect_strategy.c"
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_obj_strategy.h" "$vssim_target/ftl_obj_strategy.h"
-    #symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_obj_strategy.c" "$vssim_target/ftl_obj_strategy.c"
+    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_obj_strategy.c" "$vssim_target/ftl_obj_strategy.c"
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/TOOLS/uthash.h" "$vssim_target/uthash.h"
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_type.h" "$vssim_target/ftl_type.h"
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_gc_manager.h" "$vssim_target/ftl_gc_manager.h"

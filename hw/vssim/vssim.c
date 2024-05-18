@@ -376,6 +376,7 @@ static int object_prwv(BDRVVSSIMState *s, uint64_t offset,
         }
 
     // Pass rw to simulator
+    /* implementation is deprecated
     if (s->simulator)
     {
         if (write)
@@ -385,8 +386,11 @@ static int object_prwv(BDRVVSSIMState *s, uint64_t offset,
             _FTL_OBJ_WRITE(obj_loc, offset, bytes);
         }
         else
+        {
             _FTL_OBJ_READ(obj_loc, offset, bytes);
+        }
     }
+    */
 
     exit:
     if (meta_buf)

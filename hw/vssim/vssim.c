@@ -382,10 +382,13 @@ static int object_prwv(BDRVVSSIMState *s, uint64_t offset,
         {
             if (!lookup_object(obj_loc.object_id))
                 _FTL_OBJ_CREATE(obj_loc, bytes);
-            _FTL_OBJ_WRITE(obj_loc, offset, bytes);
+            _FTL_OBJ_WRITE(obj_loc, NULL, offset, bytes);
         }
         else
-            _FTL_OBJ_READ(obj_loc, offset, bytes);
+        {
+            length_t size = bytes;
+            _FTL_OBJ_READ(obj_loc, NULL, offset, &size);
+        }
     }
 
     exit:

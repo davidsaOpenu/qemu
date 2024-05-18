@@ -11,3 +11,15 @@ common-obj-$(CONFIG_VSSIM) += simulator/ssd_log_manager.o
 common-obj-$(CONFIG_VSSIM) += simulator/logging_backend.o simulator/logging_manager.o simulator/logging_parser.o simulator/logging_rt_analyzer.o
 common-obj-$(CONFIG_VSSIM) += simulator/logging_server.o simulator/logging_statistics.o
 common-obj-$(CONFIG_VSSIM) += simulator/logging_offline_analyzer.o
+
+common-obj-$(CONFIG_VSSIM) += simulator/osc-osd/osd-target/attr.o
+common-obj-$(CONFIG_VSSIM) += simulator/osc-osd/osd-target/cdb.o
+common-obj-$(CONFIG_VSSIM) += simulator/osc-osd/osd-target/coll.o
+common-obj-$(CONFIG_VSSIM) += simulator/osc-osd/osd-target/db.o
+common-obj-$(CONFIG_VSSIM) += simulator/osc-osd/osd-target/list-entry.o
+common-obj-$(CONFIG_VSSIM) += simulator/osc-osd/osd-target/mtq.o
+common-obj-$(CONFIG_VSSIM) += simulator/osc-osd/osd-target/obj.o
+common-obj-$(CONFIG_VSSIM) += simulator/osc-osd/osd-target/osd-schema.o
+common-obj-$(CONFIG_VSSIM) += simulator/osc-osd/osd-target/osd-sense.o
+common-obj-$(CONFIG_VSSIM) += simulator/osc-osd/osd-target/osd.o
+common-obj-$(CONFIG_VSSIM) += simulator/osc-osd/osd-util/osd-util.o

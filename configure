@@ -1978,9 +1978,9 @@ fi
 
 ## VSSIM
 QEMU_CFLAGS="-D VSSIM_NEXTGEN_BUILD_SYSTEM $QEMU_CFLAGS"
-QEMU_INCLUDES="-I/opt/libwebsockets/include $QEMU_INCLUDES"
+QEMU_INCLUDES="-I/opt/libwebsockets/include -I\$(SRC_PATH)/osc-osd/ $QEMU_INCLUDES"
 LDFLAGS="-L/opt/libwebsockets/lib $LDFLAGS"
-LIBS="-lwebsockets $LIBS"
+LIBS="-lwebsockets -lsqlite3 $LIBS"
 
 # Configure optional vssim links
 if test "$vssim" = "yes" ; then

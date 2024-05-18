@@ -36,6 +36,11 @@
 #include "qapi/visitor.h"
 #include "sysemu/block-backend.h"
 
+#include "osc-osd/osd-target/osd.h"
+#include "osc-osd/osd-util/osd-util.h"
+#include "osc-osd/osd-util/osd-defs.h"
+#include "hw/vssim/simulator/ftl_obj_strategy.h"
+
 #include "qemu/log.h"
 #include "trace.h"
 #include "nvme.h"
@@ -50,7 +55,31 @@
             " in %s: " fmt "\n", __func__, ## __VA_ARGS__); \
     } while (0)
 
+static struct osd_device osd;
+static uint8_t *osd_sense;
+
+#define OSD_READ_VALUE_OFFSET       (44)
+#define OSD_LIST_BUFFER_SIZE        (1024)
+#define OSD_LIST_VALUES_OFFSET      (24)
+#define OSD_KEY_SIZE                (8)
+#define NVMECLI_KEY_SIZE            (16)
+#define NVMECLI_KEY_PADDED          (20)
+
+static void osd_init(void);
+static void osd_term(void);
+
 static void nvme_process_sq(void *opaque);
+
+static uint16_t nvme_kv_delete(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
+    NvmeRequest *req);
+static uint16_t nvme_kv_retreive(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
+    NvmeRequest *req);
+static uint16_t nvme_kv_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
+    NvmeRequest *req);
+static uint16_t nvme_kv_list(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
+    NvmeRequest *req);
+static uint16_t nvme_kv_exist(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
+    NvmeRequest *req);
 
 static void nvme_addr_read(NvmeCtrl *n, hwaddr addr, void *buf, int size)
 {
@@ -555,7 +584,7 @@ static void nvme_kv_remove_object(NvmeNamespace *ns, const NvmeKVKey *key)
         }
 
         QLIST_REMOVE(obj, node);
-        g_free(obj->value);
+        if (obj->value_length) g_free(obj->value);
         g_free(obj);
     }
 }
@@ -594,10 +623,21 @@ static uint16_t nvme_kv_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         return status;
     }
 
+    if (kv_cmd->key_low > UINT64_MAX - USEROBJECT_OID_LB) {
+        printf("Overflow detected while calculating the object id!\n");
+        nvme_kv_delete(n, ns, cmd, req);
+        return NVME_INVALID_KEY;
+        // TODO: after fixing issue with kv_cmd->key_high, we
+        // should reconsider this if condition.
+    }
+
     // TODO: check store options, don't override if not wanted.
-    nvme_kv_remove_object(ns, &key);
+    nvme_kv_delete(n, ns, cmd, req);
 
     uint8_t *data = NULL;
+
+    // Dummy pointer, for empty files.
+    uint8_t dummy = 0;
 
     if (kv_cmd->value_size > 0) {
         data = g_malloc0(kv_cmd->value_size);
@@ -607,6 +647,8 @@ static uint16_t nvme_kv_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
             g_free(data);
             return status;
         }
+    } else {
+        data = &dummy;
     }
 
     // Here, we should forward the call to the evssim, but until then, we just store the object in memory
@@ -615,6 +657,44 @@ static uint16_t nvme_kv_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     fs_obj->value = data;
     fs_obj->value_length = kv_cmd->value_size;
     QLIST_INSERT_HEAD(&ns->fs_objects, fs_obj, node);
+
+    // Store the value using the FTL API and OSD target API
+
+    // TODO: fix issue with kv_cmd->key_high
+    obj_id_t object = {
+        .object_id = USEROBJECT_OID_LB + kv_cmd->key_low,
+        .partition_id = PARTITION_PID_LB
+    };
+
+    ftl_ret_val ftl_ret = 0;
+    int osd_ret = 0;
+    if (!lookup_object(object.object_id)) {
+        ftl_ret = _FTL_OBJ_CREATE(object, kv_cmd->value_size);
+        if (ftl_ret != FTL_SUCCESS) {
+            printf("Failed to create object\n");
+            return NVME_FTL_API_FAILED;
+        }
+
+        osd_ret = osd_create_and_write(&osd, object.partition_id, object.object_id,
+            kv_cmd->value_size, 0, (uint8_t *)data, 0, 0, osd_sense, DDT_CONTIG);
+        if (osd_ret < 0) {
+            printf("Failed to osd_create_and_write with ret: %d\n", osd_ret);
+            return NVME_OSD_FAILED;
+        }
+    } else {
+        ftl_ret = _FTL_OBJ_WRITE(object, 0 /* offest */, kv_cmd->value_size);
+        if (ftl_ret != FTL_SUCCESS) {
+            printf("Failed to write object using FTP API.\n");
+            return NVME_FTL_API_FAILED;
+        }
+
+        osd_ret = osd_write(&osd, object.partition_id, object.object_id,
+            kv_cmd->value_size, 0, (uint8_t *)data, 0, osd_sense, DDT_CONTIG);
+        if (osd_ret < 0) {
+            printf("Failed to osd_write with ret: %d\n", osd_ret);
+            return NVME_OSD_FAILED;
+        }
+    }
 
     return NVME_SUCCESS;
 }
@@ -640,19 +720,64 @@ static uint16_t nvme_kv_retreive(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         return NVME_INVALID_FIELD | NVME_DNR;
     }
 
-    void *data_start = ((uint8_t*)obj->value) + kv_cmd->offset;
-    const uint32_t value_length = obj->value_length - kv_cmd->offset;
+    // Retreive the value using the FTL API and OSD target API
+
+    if (kv_cmd->key_low > UINT64_MAX - USEROBJECT_OID_LB) {
+        printf("Overflow detected while calculating the object id!\n");
+        return NVME_INVALID_KEY;
+        // TODO: after fixing issue with kv_cmd->key_high, we
+        // should reconsider this if condition.
+    }
+
+    // TODO: fix issue with kv_cmd->key_high
+    obj_id_t object = {
+        .object_id = USEROBJECT_OID_LB + kv_cmd->key_low,
+        .partition_id = PARTITION_PID_LB
+    };
+
+    ftl_ret_val ftl_ret = _FTL_OBJ_READ(object, 0 /* offest */, kv_cmd->value_size);
+    if (ftl_ret != FTL_SUCCESS) {
+        printf("Failed to read object using FTP API.\n");
+        return NVME_FTL_API_FAILED;
+    }
+
+    // Dummy pointer, for empty files.
+    uint8_t dummy = 0;
+
+    void *data = g_malloc0(kv_cmd->value_size + 1);
+    if (!data && kv_cmd->value_size > 0) {
+        printf("Allocation failed.\n");
+        return NVME_SYSTEM_ERROR;
+    }
+    if (!data && kv_cmd->value_size == 0) {
+        data = &dummy;
+    }
+
+    uint64_t outlen = 0;
+    int osd_ret = osd_read(&osd, object.partition_id, object.object_id,
+                kv_cmd->value_size + 1, 0, NULL, data, &outlen, 0, osd_sense, DDT_CONTIG);
+    if (osd_ret < 0) {
+        if (kv_cmd->value_size > 0) g_free(data);
+        return NVME_OSD_FAILED;
+    }
+
+    const uint32_t value_length = get_ntohll(osd_sense + OSD_READ_VALUE_OFFSET);
+    memset(osd_sense, 0x0, 1024);
     const uint32_t actual_value_to_read = MIN(value_length, kv_cmd->value_size);
 
     if (actual_value_to_read > 0) {
-        status = nvme_dma_read_prp(n, data_start, actual_value_to_read, kv_cmd->prp1, kv_cmd->prp2);
+        status = nvme_dma_read_prp(n, data + kv_cmd->offset, actual_value_to_read, kv_cmd->prp1, kv_cmd->prp2);
         if (unlikely(status != NVME_SUCCESS)) {
+            if (kv_cmd->value_size > 0) g_free(data);
             printf("Failed read %d\n", (int)status);
             return status;
         }
     }
 
     req->cqe.result = value_length;
+
+    if (kv_cmd->value_size > 0) g_free(data);
+
     return NVME_SUCCESS;
 }
 
@@ -666,17 +791,25 @@ static uint16_t nvme_kv_delete(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         return status;
     }
 
+    if (kv_cmd->key_low > UINT64_MAX - USEROBJECT_OID_LB) {
+        printf("Overflow detected while calculating the object id!\n");
+        return NVME_INVALID_KEY;
+        // TODO: after fixing issue with kv_cmd->key_high, we
+        // should reconsider this if condition.
+    }
+
     nvme_kv_remove_object(ns, &key);
+
+    // TODO: fix issue with kv_cmd->key_high
+    obj_id_t object = {
+        .object_id = USEROBJECT_OID_LB + kv_cmd->key_low,
+        .partition_id = PARTITION_PID_LB
+    };
+
+    _FTL_OBJ_DELETE(object);
+    osd_remove(&osd, object.partition_id, object.object_id, 0, osd_sense);
+
     return NVME_SUCCESS;
-}
-
-#define PADDING_SIZE 4
-#define PADDING_MASK (PADDING_SIZE - 1)
-#define padded_key_len(len) ((len) + PADDING_MASK) & ~PADDING_MASK
-
-static uint32_t nvme_kv_list_key_len(NvmeKVKey *key)
-{
-    return padded_key_len(sizeof(uint16_t) + key->len);
 }
 
 static uint16_t nvme_kv_list(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
@@ -684,55 +817,60 @@ static uint16_t nvme_kv_list(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 {
     NvmeKvCmd *kv_cmd = (NvmeKvCmd *)cmd;
 
-    NvmeKVKey key;
-    uint16_t status = nvme_kv_make_key(kv_cmd, &key);
-    if (unlikely(status != NVME_SUCCESS)) {
-        return status;
-    }
-
     // First, calculate the required buffer size
     if (kv_cmd->value_size < sizeof(uint32_t)) {
         printf("Invalid size, must be at least 4\n");
         return NVME_KEY_DOES_NOT_EXIST | NVME_DNR;
     }
 
-    NvmeFsObj *first_obj = nvme_kv_find_obj(ns, &key);
-    if (!first_obj) {
-        // If the key wasn't found, start from the beginings.
-        first_obj = QLIST_FIRST(&ns->fs_objects);
+    struct getattr_list get_attr = {
+        .sz = 0,
+        .le = 0
+    };
+
+    uint8_t buffer[OSD_LIST_BUFFER_SIZE] = {0x0};
+    uint64_t used = 0;
+
+    uint64_t minimum_obj_id = INT64_MIN;
+    if (kv_cmd->key_low != 0) {
+        minimum_obj_id = kv_cmd->key_low + USEROBJECT_OID_LB;
+    }
+    int osd_ret = osd_list(&osd, 0, USEROBJECT_PID_LB, sizeof(buffer), minimum_obj_id, &get_attr,
+        0, buffer, &used, osd_sense);
+    if (osd_ret < 0) {
+        printf("failed to execute osd_list\n");
+        return NVME_OSD_FAILED;
     }
 
-    NvmeFsObj *obj = NULL;
-
-    // First, calculate the amount of keys and the required buffer size.
-    uint32_t keys_count = 0;
-    uint32_t required_buffer_size = sizeof(uint32_t);
-    for (obj = first_obj; obj; obj = QLIST_NEXT(obj, node)) {
-        const uint32_t key_size = nvme_kv_list_key_len(&obj->key);
-        if ((required_buffer_size + key_size) > kv_cmd->value_size) {
-            // No more place
-            break;
-        }
-
-        keys_count++;
-        required_buffer_size += key_size;
+    if (used < OSD_LIST_VALUES_OFFSET ||
+        ((used - OSD_LIST_VALUES_OFFSET) % OSD_KEY_SIZE > 0)) {
+        printf("invalid used value from osd_list (%lu)\n", used);
+        return NVME_OSD_FAILED;
     }
+
+    used -= OSD_LIST_VALUES_OFFSET;
+    uint32_t found_keys = used / OSD_KEY_SIZE;
+    size_t required_buffer_size = sizeof(uint32_t) + \
+        found_keys * NVMECLI_KEY_PADDED;
 
     // Now, fill it on local buffer
     uint8_t *list_buf = g_malloc0(required_buffer_size);
-    *((uint32_t*)list_buf) = keys_count;
-    size_t current_offset = sizeof(uint32_t);
-    for (obj = first_obj; obj; obj = QLIST_NEXT(obj, node)) {
-        if ((current_offset + nvme_kv_list_key_len(&obj->key) > required_buffer_size)) {
-            break;
-        }
 
-        *(uint16_t *)(&list_buf[current_offset]) = obj->key.len;
-        memcpy(&list_buf[current_offset+sizeof(uint16_t)], obj->key.key, obj->key.len);
-        current_offset += nvme_kv_list_key_len(&obj->key);
+    *((uint32_t*)list_buf) = found_keys;
+    size_t current_offset = sizeof(uint32_t);
+
+    uint8_t *list = buffer + OSD_LIST_VALUES_OFFSET;
+    while (used > 0) {
+        uint64_t found_id = get_ntohll(list) - USEROBJECT_OID_LB;
+        *(uint16_t *)(&list_buf[current_offset]) = NVMECLI_KEY_SIZE;
+        memcpy(&list_buf[current_offset + sizeof(uint16_t)], (uint8_t*)&found_id,
+            sizeof(found_id));
+        used -= OSD_KEY_SIZE;
+        list += OSD_KEY_SIZE;
+        current_offset += NVMECLI_KEY_PADDED;
     }
 
-    status = nvme_dma_read_prp(n, (void*)list_buf, required_buffer_size, kv_cmd->prp1, kv_cmd->prp2);
+    uint16_t status = nvme_dma_read_prp(n, (void*)list_buf, required_buffer_size, kv_cmd->prp1, kv_cmd->prp2);
     g_free(list_buf);
     if (unlikely(status != NVME_SUCCESS)) {
         printf("Failed write %d\n", (int)status);
@@ -752,13 +890,25 @@ static uint16_t nvme_kv_exist(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     if (unlikely(status != NVME_SUCCESS)) {
         return status;
     }
-    // Here, we should forward the call to the evssim, but until then we check the qemu hosted key list
-    NvmeFsObj *obj = nvme_kv_find_obj(ns, &key);
-    if (!obj) {
-        req->cqe.result = NVME_KEY_DOES_NOT_EXIST;
+
+    if (kv_cmd->key_low > UINT64_MAX - USEROBJECT_OID_LB) {
+        printf("Overflow detected while calculating the object id!\n");
+        nvme_kv_delete(n, ns, cmd, req);
+        return NVME_INVALID_KEY;
+        // TODO: after fixing issue with kv_cmd->key_high, we
+        // should reconsider this if condition.
     }
+
+    // TODO: fix issue with kv_cmd->key_high
+    obj_id_t object = {
+        .object_id = USEROBJECT_OID_LB + kv_cmd->key_low,
+        .partition_id = PARTITION_PID_LB
+    };
+
+    if (!lookup_object(object.object_id))
+        req->cqe.result = NVME_KEY_DOES_NOT_EXIST;
     else
-    	req->cqe.result = 0;
+        req->cqe.result = 0;
   
     return NVME_SUCCESS;
 }
@@ -2038,6 +2188,22 @@ static void nvme_class_init(ObjectClass *oc, void *data)
     dc->vmsd = &nvme_vmstate;
 }
 
+static void osd_init(void) {
+    const char *root = "/tmp/osd/";
+    assert(!system("rm -rf /tmp/osd"));
+    assert(!osd_open(root, &osd));
+    osd_sense = (uint8_t*)g_malloc(1024);
+
+    // creating a single partition, to be used later to store all
+    // user objects
+    assert(!osd_create_partition(&osd, PARTITION_PID_LB, 0, osd_sense));
+}
+
+static void osd_term(void) {
+    free(osd_sense);
+    osd_close(&osd);
+}
+
 static void nvme_instance_init(Object *obj)
 {
     NvmeCtrl *s = NVME(obj);
@@ -2045,14 +2211,26 @@ static void nvme_instance_init(Object *obj)
     device_add_bootindex_property(obj, &s->conf.bootindex,
                                   "bootindex", "/namespace@1,0",
                                   DEVICE(obj), &error_abort);
+
+    INIT_OBJ_STRATEGY();
+    osd_init();
+}
+
+static void nvme_class_finalize(ObjectClass *obj, void *data)
+{
+    // NvmeCtrl *s = NVME(obj); // Might be used later
+
+    TERM_OBJ_STRATEGY();
+    osd_term();
 }
 
 static const TypeInfo nvme_info = {
-    .name          = "nvme",
-    .parent        = TYPE_PCI_DEVICE,
-    .instance_size = sizeof(NvmeCtrl),
-    .class_init    = nvme_class_init,
-    .instance_init = nvme_instance_init,
+    .name           = "nvme",
+    .parent         = TYPE_PCI_DEVICE,
+    .instance_size  = sizeof(NvmeCtrl),
+    .class_init     = nvme_class_init,
+    .instance_init  = nvme_instance_init,
+    .class_finalize = nvme_class_finalize,
     .interfaces = (InterfaceInfo[]) {
         { INTERFACE_PCIE_DEVICE },
         { }

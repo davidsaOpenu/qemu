@@ -1,0 +1,22 @@
+attr.o: attr.c osd-types.h ../osd-util/osd-defs.h db.h attr.h \
+ ../osd-util/osd-util.h list-entry.h
+db.o: db.c osd-types.h ../osd-util/osd-defs.h osd.h cdb.h db.h obj.h \
+ coll.h ../osd-util/osd-util.h attr.h
+obj.o: obj.c osd.h osd-types.h ../osd-util/osd-defs.h cdb.h \
+ ../osd-util/osd-util.h obj.h db.h
+osd-schema.o: osd-schema.c
+osd.o: osd.c osd.h osd-types.h ../osd-util/osd-defs.h cdb.h \
+ target-sense.h db.h attr.h ../osd-util/osd-util.h obj.h coll.h mtq.h \
+ ../osd-util/osd-sense.h list-entry.h
+cdb.o: cdb.c osd.h osd-types.h ../osd-util/osd-defs.h cdb.h \
+ ../osd-util/osd-sense.h target-sense.h ../osd-util/osd-util.h \
+ list-entry.h
+osd-sense.o: osd-sense.c target-sense.h ../osd-util/osd-sense.h \
+ ../osd-util/osd-util.h ../osd-util/osd-defs.h
+list-entry.o: list-entry.c osd.h osd-types.h ../osd-util/osd-defs.h cdb.h \
+ list-entry.h ../osd-util/osd-util.h
+osd-schema.o: osd-schema.c
+coll.o: coll.c osd-types.h ../osd-util/osd-defs.h db.h coll.h \
+ ../osd-util/osd-util.h list-entry.h
+mtq.o: mtq.c osd-types.h ../osd-util/osd-defs.h db.h obj.h attr.h coll.h \
+ mtq.h ../osd-util/osd-util.h list-entry.h

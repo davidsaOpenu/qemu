@@ -1,0 +1,11 @@
+common-obj-y += osd-target/attr.o
+common-obj-y += osd-target/cdb.o
+common-obj-y += osd-target/coll.o
+common-obj-y += osd-target/db.o
+common-obj-y += osd-target/list-entry.o
+common-obj-y += osd-target/mtq.o
+common-obj-y += osd-target/obj.o
+common-obj-y += osd-target/osd-schema.o
+common-obj-y += osd-target/osd-sense.o
+common-obj-y += osd-target/osd.o
+common-obj-y += osd-util/osd-util.o

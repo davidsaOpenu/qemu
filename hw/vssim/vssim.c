@@ -125,6 +125,81 @@ static void vssim_close(BlockDriverState *bs)
     g_device_open = false;
 }
 
+<<<<<<< PATCH SET (164aeb Integrate FTL and osd API into QEMU nvme module)
+/**
+ * Object private read & write function.
+ *
+ * use write to distinguise between read & write mode (0 = read, non-zero = write).
+ * qiov should hold the metadata info (used to find the object info)
+ */
+static int object_prwv(BDRVVSSIMState *s, uint64_t offset,
+        uint64_t bytes, QEMUIOVector *qiov, int write)
+{
+    int ret = 0;
+    uint8_t *meta_buf = NULL;
+    object *object = NULL;
+    obj_id_t obj_loc = {
+        .partition_id = 0,
+        .object_id = 0};
+
+    if (!qiov->metadata_len)
+    {
+        ret |= BDRV_BLOCK_ZERO; /* TODO: define a new value for this case */
+        goto exit;
+    }
+
+    /* parse metadata */
+    meta_buf = g_malloc(qiov->metadata_len);
+    qemu_iovec_get_metadata(qiov, meta_buf, qiov->metadata_len);
+    if (!parse_metadata(meta_buf, qiov->metadata_len, &obj_loc))
+    {
+        ret |= BDRV_BLOCK_ZERO; /* TODO: define a new value for this case */
+        goto exit;
+    }
+    g_free(meta_buf);
+    meta_buf = NULL;
+
+    /* Fetch the object from the hashmap */
+    if (!(object = get_object(&(s->part), obj_loc, write)))
+    {
+        ret |= BDRV_BLOCK_DATA; /* TODO: define a new value for this case */
+        goto exit;
+    }
+
+    if (write)
+        write_to_object(qiov, object, offset, bytes);
+    else
+        if (!read_from_object(qiov, object, offset, bytes))
+        {
+            ret |= BDRV_BLOCK_EOF;
+            goto exit;
+        }
+
+    // Pass rw to simulator
+    /* implementation is deprecated
+    if (s->simulator)
+    {
+        if (write)
+        {
+            if (!lookup_object(obj_loc.object_id))
+                _FTL_OBJ_CREATE(obj_loc, bytes);
+            _FTL_OBJ_WRITE(obj_loc, offset, bytes);
+        }
+        else
+        {
+            _FTL_OBJ_READ(obj_loc, offset, bytes);
+        }
+    }
+    */
+
+    exit:
+    if (meta_buf)
+        g_free(meta_buf);
+    return ret;
+}
+
+=======
+>>>>>>> BASE      (4810ec Revert "Added object strategy to the new qemu")
 static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
         uint64_t bytes, QEMUIOVector *qiov, int flags)
 {

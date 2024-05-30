@@ -1,6 +1,29 @@
 {
   "comments": [
     {
+      "unresolved": true,
+      "key": {
+        "uuid": "543395c0_166d2b61",
+        "filename": "/COMMIT_MSG",
+        "patchSetId": 2
+      },
+      "lineNbr": 8,
+      "author": {
+        "id": 1007990
+      },
+      "writtenOn": "2024-05-30T13:13:47Z",
+      "side": 1,
+      "message": "And an additional one to write great commit message:\n\nTitle: Summary, imperative, start upper case, don\u0027t end with a period\nNo more than 50 chars. #### 50 chars is here: #\n\nRemember blank line between title and body.\n\nBody: Explain what and why (not how). Include task ID (Jira issue).\nWrap at 72 chars. ################################## which is here: #\n\nAt the end: Include Co-authored-by for all contributors.\nInclude at least one empty line before it. Format:\nCo-authored-by: name \u003cuser@users.noreply.github.com\u003e\n\nHow to Write a Git Commit Message:\nhttps://chris.beams.io/posts/git-commit/\n\nSeparate subject from body with a blank line\nLimit the subject line to 50 characters\nCapitalize the subject line\nDo not end the subject line with a period\nUse the imperative mood in the subject line\nWrap the body at 72 characters\nUse the body to explain what and why vs. how\nSpecify a Trello card that is related to the commit",
+      "range": {
+        "startLine": 7,
+        "startChar": 0,
+        "endLine": 8,
+        "endChar": 42
+      },
+      "revId": "0d7293b95a0f7635dd87bb9e4a0851a70d472a16",
+      "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735"
+    },
+    {
       "unresolved": false,
       "key": {
         "uuid": "b4c09157_b2e43bf9",

@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "b4c09157_b2e43bf9",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 2
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 1007990
+      },
+      "writtenOn": "2024-05-30T12:59:09Z",
+      "side": 1,
+      "message": "Thank you for working on this change. Before the specifics, a general remark: it would be better to encapsulate osc-osd calls within _FTL_OBJECT_ calls, as we discussed in the meeting (_FTL_OBJ_CREATE calls to osd_create,  _FTL_OBJ_WRITE calls to ods_write etc)",
+      "revId": "0d7293b95a0f7635dd87bb9e4a0851a70d472a16",
+      "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735"
+    }
+  ]
+}

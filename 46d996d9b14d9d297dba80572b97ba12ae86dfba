@@ -1,0 +1,73 @@
+{
+  "comments": [
+    {
+      "unresolved": true,
+      "key": {
+        "uuid": "5314f46c_5faa9331",
+        "filename": "hw/block/nvme.c",
+        "patchSetId": 6
+      },
+      "lineNbr": 75,
+      "author": {
+        "id": 1007990
+      },
+      "writtenOn": "2024-06-13T12:39:55Z",
+      "side": 1,
+      "message": "let\u0027s have those methods separate for qemu kv and evssim. E.g. \nnvme_kv_retreive become unreadable :-)",
+      "range": {
+        "startLine": 66,
+        "startChar": 0,
+        "endLine": 75,
+        "endChar": 22
+      },
+      "revId": "46d996d9b14d9d297dba80572b97ba12ae86dfba",
+      "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735"
+    },
+    {
+      "unresolved": true,
+      "key": {
+        "uuid": "106eb61d_767c7733",
+        "filename": "hw/vssim/vssim.c",
+        "patchSetId": 6
+      },
+      "lineNbr": 384,
+      "author": {
+        "id": 1007990
+      },
+      "writtenOn": "2024-06-13T12:39:55Z",
+      "side": 1,
+      "message": "seems like a leftover from the previous implementation",
+      "range": {
+        "startLine": 384,
+        "startChar": 13,
+        "endLine": 384,
+        "endChar": 48
+      },
+      "revId": "46d996d9b14d9d297dba80572b97ba12ae86dfba",
+      "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735"
+    },
+    {
+      "unresolved": true,
+      "key": {
+        "uuid": "c4a4cc5d_283cc36a",
+        "filename": "hw/vssim/vssim.c",
+        "patchSetId": 6
+      },
+      "lineNbr": 390,
+      "author": {
+        "id": 1007990
+      },
+      "writtenOn": "2024-06-13T12:39:55Z",
+      "side": 1,
+      "message": "seems like as unnecessary change",
+      "range": {
+        "startLine": 389,
+        "startChar": 11,
+        "endLine": 390,
+        "endChar": 56
+      },
+      "revId": "46d996d9b14d9d297dba80572b97ba12ae86dfba",
+      "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735"
+    }
+  ]
+}

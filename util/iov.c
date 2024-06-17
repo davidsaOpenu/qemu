@@ -273,8 +273,6 @@ void qemu_iovec_init(QEMUIOVector *qiov, int alloc_hint)
     qiov->niov = 0;
     qiov->nalloc = alloc_hint;
     qiov->size = 0;
-    qiov->metadata = NULL;
-    qiov->metadata_len = 0;
 }
 
 void qemu_iovec_init_external(QEMUIOVector *qiov, struct iovec *iov, int niov)
@@ -285,8 +283,6 @@ void qemu_iovec_init_external(QEMUIOVector *qiov, struct iovec *iov, int niov)
     qiov->niov = niov;
     qiov->nalloc = -1;
     qiov->size = 0;
-    qiov->metadata = NULL;
-    qiov->metadata_len = 0;
     for (i = 0; i < niov; i++)
         qiov->size += iov[i].iov_len;
 }
@@ -386,10 +382,6 @@ void qemu_iovec_destroy(QEMUIOVector *qiov)
     g_free(qiov->iov);
     qiov->nalloc = 0;
     qiov->iov = NULL;
-    if(qiov->metadata)
-        g_free(qiov->metadata);
-    qiov->metadata = NULL;
-    qiov->metadata_len = 0;
 }
 
 void qemu_iovec_reset(QEMUIOVector *qiov)
@@ -398,10 +390,6 @@ void qemu_iovec_reset(QEMUIOVector *qiov)
 
     qiov->niov = 0;
     qiov->size = 0;
-    // if(qiov->metadata)
-    //     g_free(qiov->metadata);
-    // qiov->metadata = NULL;
-    // qiov->metadata_len = 0;
 }
 
 size_t qemu_iovec_to_buf(QEMUIOVector *qiov, size_t offset,
@@ -420,26 +408,6 @@ size_t qemu_iovec_memset(QEMUIOVector *qiov, size_t offset,
                          int fillc, size_t bytes)
 {
     return iov_memset(qiov->iov, qiov->niov, offset, fillc, bytes);
-}
-
-size_t qemu_iovec_get_metadata(QEMUIOVector *qiov, void *buf, size_t bytes)
-{
-    if (!qiov->metadata_len)
-        return 0;
-    size_t size = bytes < qiov->metadata_len ? bytes : qiov->metadata_len;
-    memcpy(buf, qiov->metadata, size);
-    return size;
-}
-
-size_t qemu_iovec_set_metadata(QEMUIOVector *qiov, void *buf, size_t bytes)
-{
-    if (!bytes)
-        return 0;
-    //if(qiov->metadata)
-    //    g_free(qiov->metadata);
-    qiov->metadata = g_malloc(bytes);
-    memcpy(qiov->metadata, buf, bytes);
-    return qiov->metadata_len = bytes;
 }
 
 /**

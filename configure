@@ -1999,7 +1999,7 @@ if test "$vssim" = "yes" ; then
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_sect_strategy.h" "$vssim_target/ftl_sect_strategy.h"
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_sect_strategy.c" "$vssim_target/ftl_sect_strategy.c"
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_obj_strategy.h" "$vssim_target/ftl_obj_strategy.h"
-    symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_obj_strategy.c" "$vssim_target/ftl_obj_strategy.c"
+    #symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_obj_strategy.c" "$vssim_target/ftl_obj_strategy.c"
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/TOOLS/uthash.h" "$vssim_target/uthash.h"
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_type.h" "$vssim_target/ftl_type.h"
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_gc_manager.h" "$vssim_target/ftl_gc_manager.h"

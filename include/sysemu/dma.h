@@ -30,12 +30,7 @@ struct QEMUSGList {
     size_t size;
     DeviceState *dev;
     AddressSpace *as;
-    void *metadata;
-    size_t metadata_len;
 };
-
-size_t qemu_sglist_get_metadata(QEMUSGList *qsg, void *buf, size_t bytes);
-size_t qemu_sglist_set_metadata(QEMUSGList *qsg, void *buf, size_t bytes);
 
 #ifndef CONFIG_USER_ONLY
 

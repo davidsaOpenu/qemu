@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "9e93b224_ac7874f0",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 1
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 1007990
+      },
+      "writtenOn": "2024-06-17T16:22:00Z",
+      "side": 1,
+      "message": "Please clone with the commit hook as described on this Gerrit page (https://review.gerrithub.io/admin/repos/davidsaOpenu/qemu,general) for effortless generation of the change request hash. It will save you the hassle of looking for the change request ID for the patch set application. Do you want to abandon this change or are you planning to reuse it?",
+      "revId": "8a52656ceb8634eab22818cadd2ccc1eca52c42c",
+      "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735"
+    }
+  ]
+}

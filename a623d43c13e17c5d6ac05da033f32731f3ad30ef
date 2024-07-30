@@ -16,6 +16,23 @@
       "message": "v+1: https://review.gerrithub.io/c/davidsaOpenu/simulator/+/1195710",
       "revId": "a623d43c13e17c5d6ac05da033f32731f3ad30ef",
       "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "b15eaaa8_cfa032fc",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 14
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 1007990
+      },
+      "writtenOn": "2024-07-30T18:46:49Z",
+      "side": 1,
+      "message": "Additional task derived from this chaange: https://trello.com/c/LmAIiKaa/114-restore-kv-in-qemu-removed-by-https-reviewgerrithubio-c-davidsaopenu-qemu-1195708-and-add-a-test-case-that-configures-and-tests",
+      "revId": "a623d43c13e17c5d6ac05da033f32731f3ad30ef",
+      "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735"
     }
   ]
 }

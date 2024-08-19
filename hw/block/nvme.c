@@ -596,14 +596,14 @@ static uint16_t nvme_ftl_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         }
     }
 
-    ftl_ret = _FTL_OBJ_WRITE(object, data, 0 /* offest */, value_size);
-    if (ftl_ret != FTL_SUCCESS) {
-        if (value_size > 0) g_free(data);
-        printf("Failed to write object using FTP API.\n");
-        return NVME_FTL_API_FAILED;
+    if (value_size > 0) {
+        ftl_ret = _FTL_OBJ_WRITE(object, data, 0 /* offest */, value_size);
+        g_free(data);
+        if (ftl_ret != FTL_SUCCESS) {
+            printf("Failed to write object using FTP API.\n");
+            return NVME_FTL_API_FAILED;
+        }
     }
-
-    if (value_size > 0) g_free(data);
 
     return NVME_SUCCESS;
 }

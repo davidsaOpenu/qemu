@@ -96,7 +96,7 @@ static int vssim_open(BlockDriverState *bs, QDict * dict, int flags,
 
     // Initialize FTL and logger
     if (s->simulator) {
-        FTL_INIT();
+        FTL_INIT(current_device_index);
         INIT_LOG_MANAGER();
     }
 

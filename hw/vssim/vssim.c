@@ -136,7 +136,7 @@ static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        _FTL_READ_SECT(offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE());
+        _FTL_READ_SECT(offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
     }
 
     return 0;
@@ -153,7 +153,7 @@ static int coroutine_fn vssim_co_pwritev(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        _FTL_WRITE_SECT(offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE());
+        _FTL_WRITE_SECT(offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
     }
 
     return 0;

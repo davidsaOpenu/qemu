@@ -1996,6 +1996,8 @@ if test "$vssim" = "yes" ; then
     symlink "$vssim_source/SSD_MODULE/ssd_log_manager.c" "$vssim_target/ssd_log_manager.c"
     symlink "$vssim_source/SSD_MODULE/ssd_util.h" "$vssim_target/ssd_util.h"
     symlink "$vssim_source/FTL_SOURCE/COMMON/common.h" "$vssim_target/common.h"
+    symlink "$vssim_source/FTL_SOURCE/COMMON/ssd_file_operations/ssd_file_operations.h" "$vssim_target/ssd_file_operations.h"
+	  symlink "$vssim_source/FTL_SOURCE/COMMON/ssd_file_operations/ssd_file_operations.c" "$vssim_target/ssd_file_operations.c"
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl.h" "$vssim_target/ftl.h"
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl.c" "$vssim_target/ftl.c"
     symlink "$vssim_source/FTL_SOURCE/PAGE_MAP/ftl_sect_strategy.h" "$vssim_target/ftl_sect_strategy.h"

@@ -2202,6 +2202,38 @@ static void blk_root_drained_end(BdrvChild *child)
     }
 }
 
+int blk_ns_create(BlockBackend *blk, uint64_t nsze, uint32_t *nsid)
+{
+    return bdrv_ns_create(blk_bs(blk), nsze, nsid);
+}
+
+int blk_ns_delete(BlockBackend *blk, uint32_t nsid)
+{
+    return bdrv_ns_delete(blk_bs(blk), nsid);
+}
+
+int blk_ns_attach(BlockBackend *blk, uint32_t nsid)
+{
+    return bdrv_ns_attach(blk_bs(blk), nsid);
+}
+
+int blk_ns_detach(BlockBackend *blk, uint32_t nsid)
+{
+    return bdrv_ns_detach(blk_bs(blk), nsid);
+}
+
+BlockBackend *blk_ns_get(BlockBackend *blk, uint32_t nsid)
+{
+    BdrvNamespace *ns;
+
+    ns = bdrv_ns_get(blk_bs(blk), nsid);
+
+    if (!ns)
+        return NULL;
+
+    return ns->opaque;
+}
+
 void blk_register_buf(BlockBackend *blk, void *host, size_t size)
 {
     bdrv_register_buf(blk_bs(blk), host, size);

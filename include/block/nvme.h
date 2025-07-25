@@ -243,6 +243,7 @@ enum NvmeAdminCommands {
     NVME_ADM_CMD_SET_FEATURES   = 0x09,
     NVME_ADM_CMD_GET_FEATURES   = 0x0a,
     NVME_ADM_CMD_ASYNC_EV_REQ   = 0x0c,
+    NVME_ADM_CMD_NS_MGMT        = 0x0d,
     NVME_ADM_CMD_ACTIVATE_FW    = 0x10,
     NVME_ADM_CMD_DOWNLOAD_FW    = 0x11,
     NVME_ADM_CMD_FORMAT_NVM     = 0x80,
@@ -463,6 +464,12 @@ enum NvmeStatusCodes {
     NVME_CMD_ABORT_MISSING_FUSE = 0x000a,
     NVME_INVALID_NSID           = 0x000b,
     NVME_CMD_SEQ_ERROR          = 0x000c,
+    NVME_NO_MEMORY              = 0x0015,
+    NVME_NO_NSID                = 0x0016,
+    NVME_NS_ATTACHED            = 0x0018,
+    NVME_NS_DETACHED            = 0x001a,
+    NVME_NS_ATMT_LIMIT          = 0x0027,
+    NVME_IO_CMD_SET_UNSUPPORTED = 0x0029,
     NVME_LBA_RANGE              = 0x0080,
     NVME_CAP_EXCEEDED           = 0x0081,
     NVME_NS_NOT_READY           = 0x0082,
@@ -644,6 +651,30 @@ enum NvmeIdCtrlOncs {
     NVME_ONCS_RESRVATIONS   = 1 << 5,
 };
 
+typedef struct NvmeNsMgmtCreate {
+    uint64_t nsze;
+    uint64_t ncap;
+    uint8_t rsvd25[10];
+    uint8_t flbas;
+    uint8_t rsvd28[2];
+    uint8_t dps;
+    uint8_t nmic;
+    uint8_t rsvd91[61];
+    uint32_t anagrpid;
+    uint8_t rsvd99[4];
+    uint16_t nvmsetid;
+    uint16_t endgid;
+    uint8_t rsvd383[280];
+    uint32_t lbstm;
+    uint16_t nphndls;
+    uint8_t rsvd498[105];
+    uint8_t rsvd511[13];
+    uint16_t ruh[128];
+    uint8_t rsvd4095[3328];
+
+
+} NvmeNsMgmtCreate;
+
 #define NVME_CTRL_SQES_MIN(sqes) ((sqes) & 0xf)
 #define NVME_CTRL_SQES_MAX(sqes) (((sqes) >> 4) & 0xf)
 #define NVME_CTRL_CQES_MIN(cqes) ((cqes) & 0xf)
@@ -689,6 +720,16 @@ enum NvmeFeatureIds {
 
     // Vendor specific features ids
     NVME_SET_KEY_VALUE_CSI          = 0xC0,  // Change the namespace CSI value to key-value.
+};
+
+enum NvmeMgmtOp {
+    NVME_NS_CREATE = 0x0,
+    NVME_NS_DELETE = 0x1,
+};
+
+enum NvmeAttachmentOp {
+    NVME_NS_ATTACH = 0x0,
+    NVME_NS_DETACH = 0x1,
 };
 
 typedef struct NvmeRangeType {
@@ -762,5 +803,6 @@ static inline void _nvme_check_size(void)
     QEMU_BUILD_BUG_ON(sizeof(NvmeSmartLog) != 512);
     QEMU_BUILD_BUG_ON(sizeof(NvmeIdCtrl) != 4096);
     QEMU_BUILD_BUG_ON(sizeof(NvmeIdNs) != 4096);
+    QEMU_BUILD_BUG_ON(sizeof(NvmeNsMgmtCreate) != 4096);
 }
 #endif

@@ -464,6 +464,15 @@ struct BlockDriver {
                                                 const char *name,
                                                 Error **errp);
 
+    // uint32_t (*bdrv_ns_get_max)(BlockDriverState *bs);
+    // uint32_t (*bdrv_ns_get_allocated_count)(BlockDriverState *bs);
+    // int (*bdrv_ns_get_ns_descs)(BlockDriveState *bs, size_t count, BlockNamespaceDescription *descs);
+    int (*bdrv_ns_create)(BlockDriverState *bs, uint64_t nsze, uint32_t *nsid);
+    int (*bdrv_ns_delete)(BlockDriverState *bs, uint32_t nsid);
+    int (*bdrv_ns_attach)(BlockDriverState *bs, uint32_t nsid);
+    int (*bdrv_ns_detach)(BlockDriverState *bs, uint32_t nsid);
+    BdrvNamespace *(*bdrv_ns_get)(BlockDriverState *bs, uint32_t nsid);
+
     /**
      * Register/unregister a buffer for I/O. For example, when the driver is
      * interested to know the memory areas that will later be used in iovs, so
@@ -612,6 +621,10 @@ struct BdrvChild {
 
     QLIST_ENTRY(BdrvChild) next;
     QLIST_ENTRY(BdrvChild) next_parent;
+};
+
+struct BdrvNamespace {
+    void *opaque;
 };
 
 /*

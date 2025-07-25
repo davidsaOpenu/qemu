@@ -15,6 +15,7 @@
 typedef struct BlockDriver BlockDriver;
 typedef struct BdrvChild BdrvChild;
 typedef struct BdrvChildRole BdrvChildRole;
+typedef struct BdrvNamespace BdrvNamespace;
 
 typedef struct BlockDriverInfo {
     /* in bytes, 0 if irrelevant */
@@ -601,6 +602,13 @@ void bdrv_del_child(BlockDriverState *parent, BdrvChild *child, Error **errp);
 
 bool bdrv_can_store_new_dirty_bitmap(BlockDriverState *bs, const char *name,
                                      uint32_t granularity, Error **errp);
+
+int bdrv_ns_create(BlockDriverState *bs, uint64_t nsze, uint32_t *nsid);
+int bdrv_ns_delete(BlockDriverState *bs, uint32_t nsid);
+int bdrv_ns_attach(BlockDriverState *bs, uint32_t nsid);
+int bdrv_ns_detach(BlockDriverState *bs, uint32_t nsid);
+BdrvNamespace *bdrv_ns_get(BlockDriverState *bs, uint32_t nsid);
+
 /**
  *
  * bdrv_register_buf/bdrv_unregister_buf:
@@ -611,4 +619,5 @@ bool bdrv_can_store_new_dirty_bitmap(BlockDriverState *bs, const char *name,
  */
 void bdrv_register_buf(BlockDriverState *bs, void *host, size_t size);
 void bdrv_unregister_buf(BlockDriverState *bs, void *host);
+
 #endif

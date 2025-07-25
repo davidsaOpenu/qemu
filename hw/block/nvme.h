@@ -66,10 +66,6 @@ typedef struct NvmeCQueue {
     QTAILQ_HEAD(event_queue, AsyncEvent) event_queue;
 } NvmeCQueue;
 
-typedef struct NvmeNamespace {
-    NvmeIdNs        id_ns;
-} NvmeNamespace;
-
 #define TYPE_NVME "nvme"
 #define NVME(obj) \
         OBJECT_CHECK(NvmeCtrl, (obj), TYPE_NVME)
@@ -98,7 +94,6 @@ typedef struct NvmeCtrl {
     uint64_t    irq_status;
 
     char            *serial;
-    NvmeNamespace   *namespaces;
     NvmeSQueue      **sq;
     NvmeCQueue      **cq;
     NvmeSQueue      admin_sq;

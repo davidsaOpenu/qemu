@@ -229,6 +229,12 @@ void blk_io_limits_enable(BlockBackend *blk, const char *group);
 void blk_io_limits_update_group(BlockBackend *blk, const char *group);
 void blk_set_force_allow_inactivate(BlockBackend *blk);
 
+int blk_ns_create(BlockBackend *blk, uint64_t nsze, uint32_t *nsid);
+int blk_ns_delete(BlockBackend *blk, uint32_t nsid);
+int blk_ns_attach(BlockBackend *blk, uint32_t nsid);
+int blk_ns_detach(BlockBackend *blk, uint32_t nsid);
+BlockBackend *blk_ns_get(BlockBackend *blk, uint32_t nsid);
+
 void blk_register_buf(BlockBackend *blk, void *host, size_t size);
 void blk_unregister_buf(BlockBackend *blk, void *host);
 

@@ -1,0 +1,50 @@
+{
+  "comments": [
+    {
+      "unresolved": true,
+      "key": {
+        "uuid": "084ebf61_44b663c5",
+        "filename": "include/block/block.h",
+        "patchSetId": 1
+      },
+      "lineNbr": 18,
+      "author": {
+        "id": 1007990
+      },
+      "writtenOn": "2025-07-25T15:51:45Z",
+      "side": 1,
+      "message": "block.h is meant to define the generic block device interface. Adding NVMe-specific types pollutes this interface with protocol-specific details that other block drivers don\u0027t need or use.\n\nBetter to think about NVMe namespaces as separate BlockDriverState instances with appropriate parent-child relationships.",
+      "range": {
+        "startLine": 18,
+        "startChar": 0,
+        "endLine": 18,
+        "endChar": 43
+      },
+      "revId": "fae5e52bcef1e3a5d3d88204ffe16d7cddbb6414",
+      "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735"
+    },
+    {
+      "unresolved": true,
+      "key": {
+        "uuid": "f8ba4ea9_28f5bbb6",
+        "filename": "include/block/block.h",
+        "patchSetId": 1
+      },
+      "lineNbr": 610,
+      "author": {
+        "id": 1007990
+      },
+      "writtenOn": "2025-07-25T15:51:45Z",
+      "side": 1,
+      "message": "Create NVMe-specific functions that operate on the existing BlockDriverState without requiring new core types",
+      "range": {
+        "startLine": 606,
+        "startChar": 0,
+        "endLine": 610,
+        "endChar": 64
+      },
+      "revId": "fae5e52bcef1e3a5d3d88204ffe16d7cddbb6414",
+      "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735"
+    }
+  ]
+}

@@ -43,13 +43,15 @@
 
 #define VSSIM_BLOCK_OPT_SIMULATOR             ("simulator")
 
-static bool g_device_open = false;
+static bool g_ftl_initialized = false;
+static int g_device_count = 0;
 
 typedef struct BDRVVSSIMState {
     char * memory;
     uint64_t size;
     bool simulator;
     uint32_t nsid;
+    uint8_t device_index;
 } BDRVVSSIMState;
 
 static QemuOptsList runtime_opts = {
@@ -70,19 +72,24 @@ static QemuOptsList runtime_opts = {
     },
 };
 
+static uint8_t vssim_get_device_index_from_serial(BlockDriverState *bs) {
+    // Try to get serial from device name or use default
+    const char *serial = bs->device_name ? bs->device_name : "1";
+
+    int serial_num = atoi(serial);
+    int index = serial_num - 1;  // Convert 1,2,3... to 0,1,2...
+
+    return (index >= 0 && index < MAX_DEVICES) ? index : 0;
+}
+
 static int vssim_open(BlockDriverState *bs, QDict * dict, int flags,
                       Error **errp)
 {
     BDRVVSSIMState *s = bs->opaque;
     QemuOpts *opts = NULL;
-    trace_vssim_open(bs);
+    ssd_config_t *devices = NULL;
 
-    // Only a single device is allowed due to global use of FTL
-    if (g_device_open) {
-        error_setg(errp, "vssim device allows only a single instance");
-        return -EINVAL;
-    }
-    g_device_open = true;
+    trace_vssim_open(bs);
 
     // Prase the drive options
     opts = qemu_opts_create(&runtime_opts, NULL, 0, &error_abort);
@@ -94,16 +101,37 @@ static int vssim_open(BlockDriverState *bs, QDict * dict, int flags,
 
     // TODO: Set the namespace ID.
     s->nsid = 0;
+    if (s->simulator) {
+        if (!g_ftl_initialized) {
+            INIT_SSD_CONFIG();
+            g_ftl_initialized = true;
+        }
+
+        // Get device index for this BlockDriverState
+        s->device_index = vssim_get_device_index_from_serial(bs);
+
+        // Validate device index
+        devices = GET_DEVICES();
+        if (s->device_index >= device_count) {
+            error_setg(errp, "VSSIM device index %d exceeds configured devices (%d)",
+                       s->device_index, device_count);
+            return -EINVAL;
+        }
+
+        // Override size from device configuration
+        ssd_config_t *device = &devices[s->device_index];
+        s->size = (uint64_t)device->flash_nb * device->block_nb *
+                  device->page_nb * device->page_size;
+
+        // Initialize FTL for this specific device
+        FTL_INIT_DEVICE(s->device_index);
+        INIT_LOG_MANAGER_DEVICE(s->device_index);
+    }
 
     // Allocate the memory
     s->memory = qemu_blockalign0(bs, s->size);
 
-    // Initialize FTL and logger
-    if (s->simulator) {
-        FTL_INIT();
-        INIT_LOG_MANAGER();
-    }
-
+    g_device_count++;
     trace_vssim_initialized(bs, s->size, s->memory);
 
     return 0;
@@ -114,10 +142,10 @@ static void vssim_close(BlockDriverState *bs)
     BDRVVSSIMState *s = bs->opaque;
     trace_vssim_close(bs);
 
-    // Destruct FTL
+    // Destruct FTL for this device
     if (s->simulator) {
-        TERM_LOG_MANAGER();
-        FTL_TERM();
+        TERM_LOG_MANAGER(s->device_index);
+        FTL_TERM(s->device_index);
     }
 
     // Clear memory
@@ -125,8 +153,12 @@ static void vssim_close(BlockDriverState *bs)
         qemu_vfree(s->memory);
     }
 
-    // Clear singleton state
-    g_device_open = false;
+    g_device_count--;
+
+    // Clean up global state when all devices are closed
+    if (g_device_count == 0 && g_ftl_initialized) {
+        g_ftl_initialized = false;
+    }
 }
 
 static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
@@ -140,7 +172,10 @@ static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        _FTL_READ_SECT(s->nsid, offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
+        _FTL_READ_SECT(s->device_index,
+                        s->nsid,
+                        offset / GET_SECTOR_SIZE(s->device_index),
+                        bytes / GET_SECTOR_SIZE(s->device_index), NULL);
     }
 
     return 0;
@@ -157,7 +192,10 @@ static int coroutine_fn vssim_co_pwritev(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        _FTL_WRITE_SECT(s->nsid, offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
+        _FTL_WRITE_SECT(s->device_index,
+                        s->nsid,
+                        offset / GET_SECTOR_SIZE(s->device_index),
+                        bytes / GET_SECTOR_SIZE(s->device_index), NULL);
     }
 
     return 0;

@@ -24,17 +24,18 @@
  * IN THE SOFTWARE.
  */
 
-#include "qemu/osdep.h"
-#include "qemu/option.h"
-#include "qemu/cutils.h"
-#include "qemu/error-report.h"
-#include "qapi/qmp/qdict.h"
-#include "qapi/error.h"
-#include "block/block_int.h"
-#include "trace.h"
+ #include "qemu/osdep.h"
+ #include "qemu/option.h"
+ #include "qemu/cutils.h"
+ #include "qemu/error-report.h"
+ #include "qapi/qmp/qdict.h"
+ #include "qapi/error.h"
+ #include "block/block_int.h"
+ #include "trace.h"
+ #include "vssim.h"
 
-#include "simulator/vssim_config_manager.h"
-#include "simulator/ftl_sect_strategy.h"
+ #include "simulator/vssim_config_manager.h"
+ #include "simulator/ftl_sect_strategy.h"
 
 #define VSSIM_FILE_EXTENSION                  (".vssim")
 #define VSSIM_FILE_EXTENSION_CHARACTER_LENGTH (sizeof(VSSIM_FILE_EXTENSION)-1)
@@ -43,13 +44,10 @@
 
 #define VSSIM_BLOCK_OPT_SIMULATOR             ("simulator")
 
-static bool g_device_open = false;
+#define VSSIM_DEVICE_INDEX                    ("device_index")
 
-typedef struct BDRVVSSIMState {
-    char * memory;
-    uint64_t size;
-    bool simulator;
-} BDRVVSSIMState;
+static bool g_configuration_read = false;
+
 
 static QemuOptsList runtime_opts = {
     .name = "vssim",
@@ -65,23 +63,28 @@ static QemuOptsList runtime_opts = {
             .type = QEMU_OPT_BOOL,
             .help = "enable simulator"
         },
+        {
+            .name = VSSIM_DEVICE_INDEX,
+            .type = QEMU_OPT_NUMBER,
+            .help = "The index of the device in the configuration"
+        },
         { /* end of list */ }
     },
 };
 
-static int vssim_open(BlockDriverState *bs, QDict * dict, int flags,
+static int vssim_open(BlockDriverState* bs, QDict* dict, int flags,
                       Error **errp)
 {
     BDRVVSSIMState *s = bs->opaque;
     QemuOpts *opts = NULL;
     trace_vssim_open(bs);
 
-    // Only a single device is allowed due to global use of FTL
-    if (g_device_open) {
-        error_setg(errp, "vssim device allows only a single instance");
-        return -EINVAL;
+    if (!g_configuration_read) {
+        INIT_SSD_CONFIG();
+        g_configuration_read = true;
     }
-    g_device_open = true;
+
+
 
     // Prase the drive options
     opts = qemu_opts_create(&runtime_opts, NULL, 0, &error_abort);
@@ -89,6 +92,7 @@ static int vssim_open(BlockDriverState *bs, QDict * dict, int flags,
     s->size = qemu_opt_get_size(opts, BLOCK_OPT_SIZE,
                                 VSSIM_DEFAULT_FILE_SIZE_IN_BYTES);
     s->simulator = qemu_opt_get_bool(opts, VSSIM_BLOCK_OPT_SIMULATOR, true);
+    s->device_index = qemu_opt_get_number(opts, VSSIM_DEVICE_INDEX, 0);
     qemu_opts_del(opts);
 
     // Allocate the memory
@@ -96,8 +100,8 @@ static int vssim_open(BlockDriverState *bs, QDict * dict, int flags,
 
     // Initialize FTL and logger
     if (s->simulator) {
-        FTL_INIT();
-        INIT_LOG_MANAGER();
+        FTL_INIT(s->device_index);
+        INIT_LOG_MANAGER(s->device_index);
     }
 
     trace_vssim_initialized(bs, s->size, s->memory);
@@ -112,17 +116,14 @@ static void vssim_close(BlockDriverState *bs)
 
     // Destruct FTL
     if (s->simulator) {
-        TERM_LOG_MANAGER();
-        FTL_TERM();
+        TERM_LOG_MANAGER(s->device_index);
+        FTL_TERM(s->device_index);
     }
 
     // Clear memory
     if (NULL != s->memory) {
         qemu_vfree(s->memory);
     }
-
-    // Clear singleton state
-    g_device_open = false;
 }
 
 static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
@@ -136,7 +137,7 @@ static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        _FTL_READ_SECT(offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
+        _FTL_READ_SECT(s->device_index, offset / GET_SECTOR_SIZE(s->device_index), bytes/GET_SECTOR_SIZE(s->device_index), NULL);
     }
 
     return 0;
@@ -153,7 +154,7 @@ static int coroutine_fn vssim_co_pwritev(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        _FTL_WRITE_SECT(offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
+        _FTL_WRITE_SECT(s->device_index, offset / GET_SECTOR_SIZE(s->device_index), bytes/GET_SECTOR_SIZE(s->device_index), NULL);
     }
 
     return 0;

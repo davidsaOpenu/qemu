@@ -42,6 +42,7 @@
 
 #include "qemu/log.h"
 #include "trace.h"
+#include "../vssim/vssim.h"
 #include "nvme.h"
 
 
@@ -54,12 +55,16 @@
 #define PCI_EXP_LNKCAP_AOC 0x00400000 /* ASPM Optionality Compliance (AOC) */
 #define PCI_EXP_DEVCAP2_CTDS 0x10 /* Completion Timeout Disable Supported (CTDS) */
 
+#define INVALID_DEVICE_INDEX 0xFF
+
 #define NVME_GUEST_ERR(trace, fmt, ...) \
     do { \
         (trace_##trace)(__VA_ARGS__); \
         qemu_log_mask(LOG_GUEST_ERROR, #trace \
             " in %s: " fmt "\n", __func__, ## __VA_ARGS__); \
     } while (0)
+
+static uint8_t get_device_index(NvmeCtrl* ctrl);
 
 static void nvme_process_sq(void *opaque);
 
@@ -588,7 +593,14 @@ static uint16_t nvme_ftl_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 
     ftl_ret_val ftl_ret = 0;
     if (!lookup_object(object.object_id)) {
-        ftl_ret = _FTL_OBJ_CREATE(object, value_size);
+        uint8_t device_index = get_device_index(n);
+        if (INVALID_DEVICE_INDEX == device_index)
+        {
+            printf("Failed to get device index\n");
+            return NVME_FTL_API_FAILED;
+        }
+
+        ftl_ret = _FTL_OBJ_CREATE(device_index, object, value_size);
         if (ftl_ret != FTL_SUCCESS) {
             if (value_size > 0) g_free(data);
             printf("Failed to create object\n");
@@ -597,7 +609,14 @@ static uint16_t nvme_ftl_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     }
 
     if (value_size > 0) {
-        ftl_ret = _FTL_OBJ_WRITE(object, data, 0 /* offest */, value_size);
+        uint8_t device_index = get_device_index(n);
+        if (INVALID_DEVICE_INDEX == device_index)
+        {
+            printf("Failed to get device index\n");
+            return NVME_FTL_API_FAILED;
+        }
+
+        ftl_ret = _FTL_OBJ_WRITE(device_index, object, data, 0 /* offest */, value_size);
         g_free(data);
         if (ftl_ret != FTL_SUCCESS) {
             printf("Failed to write object using FTP API.\n");
@@ -646,7 +665,14 @@ static uint16_t nvme_ftl_retreive(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         return NVME_SYSTEM_ERROR;
     }
 
-    ftl_ret_val ftl_ret = _FTL_OBJ_READ(object, data, 0 /* offest */, &read_size);
+    uint8_t device_index = get_device_index(n);
+    if (INVALID_DEVICE_INDEX == device_index)
+    {
+        printf("Failed to get device index\n");
+        return NVME_FTL_API_FAILED;
+    }
+
+    ftl_ret_val ftl_ret = _FTL_OBJ_READ(device_index, object, data, 0 /* offest */, &read_size);
     if (ftl_ret != FTL_SUCCESS) {
         g_free(data);
         printf("Failed to read object using FTP API.\n");
@@ -687,7 +713,14 @@ static uint16_t nvme_ftl_delete(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         .partition_id = PARTITION_PID_LB
     };
 
-    _FTL_OBJ_DELETE(object);
+    uint8_t device_index = get_device_index(n);
+    if (INVALID_DEVICE_INDEX == device_index)
+    {
+        printf("Failed to get device index\n");
+        return NVME_FTL_API_FAILED;
+    }
+
+    _FTL_OBJ_DELETE(device_index, object);
 
     return NVME_SUCCESS;
 }
@@ -777,7 +810,7 @@ static uint16_t nvme_ftl_exist(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         req->cqe.result = NVME_KEY_DOES_NOT_EXIST;
     else
         req->cqe.result = 0;
-  
+
     return NVME_SUCCESS;
 }
 
@@ -836,7 +869,7 @@ static uint16_t nvme_del_sq(NvmeCtrl *n, NvmeCmd *cmd)
     NvmeSQueue *sq;
     NvmeCQueue *cq;
     uint16_t qid = le16_to_cpu(c->qid);
-    
+
     if (unlikely(!qid || !nvme_used_sqid(n, qid))) {
         trace_nvme_err_invalid_del_sq(qid);
         return NVME_INVALID_QID | NVME_DNR;
@@ -2065,6 +2098,38 @@ static void nvme_class_finalize(ObjectClass *obj, void *data)
     // NvmeCtrl *s = NVME(obj); // Might be used later
 
     TERM_OBJ_STRATEGY();
+}
+
+static uint8_t get_device_index(NvmeCtrl* ctrl)
+{
+    printf("get_device_index \n");
+
+    BlockBackend *blk = ctrl->conf.blk;
+    if (NULL == blk)
+    {
+        printf("get_device_index 1\n");
+
+        return INVALID_DEVICE_INDEX;
+    }
+
+    BlockDriverState *bs = blk_bs(blk);
+    if (NULL == bs)
+    {
+        printf("get_device_index 2\n");
+
+        return INVALID_DEVICE_INDEX;
+    }
+
+    BDRVVSSIMState *s = bs->opaque;
+    if (NULL == s)
+    {
+        printf("get_device_index 3\n");
+
+        return INVALID_DEVICE_INDEX;
+    }
+    printf("get_device_index blablablabl %u\n", s->device_index);
+
+    return s->device_index;
 }
 
 static const TypeInfo nvme_info = {

@@ -588,7 +588,8 @@ static uint16_t nvme_ftl_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 
     ftl_ret_val ftl_ret = 0;
     if (!lookup_object(object.object_id)) {
-        ftl_ret = _FTL_OBJ_CREATE(object, value_size);
+        // TODO: change device id
+        ftl_ret = _FTL_OBJ_CREATE(0, object, value_size);
         if (ftl_ret != FTL_SUCCESS) {
             if (value_size > 0) g_free(data);
             printf("Failed to create object\n");
@@ -597,7 +598,8 @@ static uint16_t nvme_ftl_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     }
 
     if (value_size > 0) {
-        ftl_ret = _FTL_OBJ_WRITE(object, data, 0 /* offest */, value_size);
+        // TODO: change device id
+        ftl_ret = _FTL_OBJ_WRITE(0, object, data, 0 /* offest */, value_size);
         g_free(data);
         if (ftl_ret != FTL_SUCCESS) {
             printf("Failed to write object using FTP API.\n");
@@ -646,7 +648,8 @@ static uint16_t nvme_ftl_retreive(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         return NVME_SYSTEM_ERROR;
     }
 
-    ftl_ret_val ftl_ret = _FTL_OBJ_READ(object, data, 0 /* offest */, &read_size);
+    // TODO: change device id
+    ftl_ret_val ftl_ret = _FTL_OBJ_READ(0, object, data, 0 /* offest */, &read_size);
     if (ftl_ret != FTL_SUCCESS) {
         g_free(data);
         printf("Failed to read object using FTP API.\n");
@@ -687,7 +690,9 @@ static uint16_t nvme_ftl_delete(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         .partition_id = PARTITION_PID_LB
     };
 
-    _FTL_OBJ_DELETE(object);
+            // TODO: change device id
+
+    _FTL_OBJ_DELETE(0, object);
 
     return NVME_SUCCESS;
 }

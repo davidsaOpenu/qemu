@@ -43,13 +43,14 @@
 
 #define VSSIM_BLOCK_OPT_SIMULATOR             ("simulator")
 
-static bool g_device_open = false;
+static bool g_configuration_read = false;
 
 typedef struct BDRVVSSIMState {
-    char * memory;
+    char* memory;
     uint64_t size;
     bool simulator;
     uint32_t nsid;
+    uint8_t device_index;
 } BDRVVSSIMState;
 
 static QemuOptsList runtime_opts = {
@@ -77,12 +78,28 @@ static int vssim_open(BlockDriverState *bs, QDict * dict, int flags,
     QemuOpts *opts = NULL;
     trace_vssim_open(bs);
 
-    // Only a single device is allowed due to global use of FTL
-    if (g_device_open) {
-        error_setg(errp, "vssim device allows only a single instance");
+    if (!g_configuration_read) {
+        INIT_SSD_CONFIG();
+        g_configuration_read = true;
+    }
+
+    uint8_t i = 0;
+    s->device_index = 0xFF;
+    for (; i < MAX_DEVICES; ++i)
+    {
+        // TODO: Check me
+        if (!strncmp(bs->filename, devices[i].file_name, PATH_MAX))
+        {
+            s->device_index = i;
+            break;
+        }
+    }
+
+    if (0xFF == s->device_index)
+    {
+        error_setg(errp, "vssim device not found");
         return -EINVAL;
     }
-    g_device_open = true;
 
     // Prase the drive options
     opts = qemu_opts_create(&runtime_opts, NULL, 0, &error_abort);
@@ -100,8 +117,8 @@ static int vssim_open(BlockDriverState *bs, QDict * dict, int flags,
 
     // Initialize FTL and logger
     if (s->simulator) {
-        FTL_INIT();
-        INIT_LOG_MANAGER();
+        FTL_INIT(s->device_index);
+        INIT_LOG_MANAGER(s->device_index);
     }
 
     trace_vssim_initialized(bs, s->size, s->memory);
@@ -116,17 +133,14 @@ static void vssim_close(BlockDriverState *bs)
 
     // Destruct FTL
     if (s->simulator) {
-        TERM_LOG_MANAGER();
-        FTL_TERM();
+        TERM_LOG_MANAGER(s->device_index);
+        FTL_TERM(s->device_index);
     }
 
     // Clear memory
     if (NULL != s->memory) {
         qemu_vfree(s->memory);
     }
-
-    // Clear singleton state
-    g_device_open = false;
 }
 
 static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
@@ -140,7 +154,7 @@ static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        _FTL_READ_SECT(s->nsid, offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
+        _FTL_READ_SECT(s->device_index, s->nsid, offset / GET_SECTOR_SIZE(s->device_index), bytes/GET_SECTOR_SIZE(s->device_index), NULL);
     }
 
     return 0;
@@ -157,7 +171,7 @@ static int coroutine_fn vssim_co_pwritev(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        _FTL_WRITE_SECT(s->nsid, offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
+        _FTL_WRITE_SECT(s->device_index, s->nsid, offset / GET_SECTOR_SIZE(s->device_index), bytes/GET_SECTOR_SIZE(s->device_index), NULL);
     }
 
     return 0;

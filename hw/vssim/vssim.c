@@ -49,7 +49,6 @@ typedef struct BDRVVSSIMState {
     char * memory;
     uint64_t size;
     bool simulator;
-    uint32_t nsid;
 } BDRVVSSIMState;
 
 static QemuOptsList runtime_opts = {
@@ -91,9 +90,6 @@ static int vssim_open(BlockDriverState *bs, QDict * dict, int flags,
                                 VSSIM_DEFAULT_FILE_SIZE_IN_BYTES);
     s->simulator = qemu_opt_get_bool(opts, VSSIM_BLOCK_OPT_SIMULATOR, true);
     qemu_opts_del(opts);
-
-    // TODO: Set the namespace ID.
-    s->nsid = 0;
 
     // Allocate the memory
     s->memory = qemu_blockalign0(bs, s->size);
@@ -140,7 +136,7 @@ static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        _FTL_READ_SECT(s->nsid, offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
+        _FTL_READ_SECT(offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
     }
 
     return 0;
@@ -157,7 +153,7 @@ static int coroutine_fn vssim_co_pwritev(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        _FTL_WRITE_SECT(s->nsid, offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
+        _FTL_WRITE_SECT(offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
     }
 
     return 0;

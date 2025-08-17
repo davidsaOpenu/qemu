@@ -586,7 +586,7 @@ static uint16_t nvme_ftl_store(NvmeCtrl *n, NvmeCmd *cmd,
     // TODO: fix issue with kv_cmd->key_high
     obj_id_t object = {
         .object_id = USEROBJECT_OID_LB + kv_cmd->key_low,
-        .partition_id = PARTITION_PID_LB
+        .partition_id = PARTITION_PID_LB + req->ns->nsid
     };
 
     ftl_ret_val ftl_ret = 0;
@@ -629,7 +629,7 @@ static uint16_t nvme_ftl_retreive(NvmeCtrl *n, NvmeCmd *cmd,
     // TODO: fix issue with kv_cmd->key_high
     obj_id_t object = {
         .object_id = USEROBJECT_OID_LB + kv_cmd->key_low,
-        .partition_id = PARTITION_PID_LB
+        .partition_id = PARTITION_PID_LB + req->ns->nsid
     };
 
     stored_object *found_object = lookup_object(object.object_id);
@@ -687,7 +687,7 @@ static uint16_t nvme_ftl_delete(NvmeCtrl *n, NvmeCmd *cmd,
     // TODO: fix issue with kv_cmd->key_high
     obj_id_t object = {
         .object_id = USEROBJECT_OID_LB + kv_cmd->key_low,
-        .partition_id = PARTITION_PID_LB
+        .partition_id = PARTITION_PID_LB + req->ns->nsid
     };
 
     _FTL_OBJ_DELETE(object);
@@ -773,7 +773,7 @@ static uint16_t nvme_ftl_exist(NvmeCtrl *n, NvmeCmd *cmd,
     // TODO: fix issue with kv_cmd->key_high
     obj_id_t object = {
         .object_id = USEROBJECT_OID_LB + kv_cmd->key_low,
-        .partition_id = PARTITION_PID_LB
+        .partition_id = PARTITION_PID_LB + req->ns->nsid
     };
 
     if (!lookup_object(object.object_id))
@@ -787,6 +787,10 @@ static uint16_t nvme_ftl_exist(NvmeCtrl *n, NvmeCmd *cmd,
 static uint16_t nvme_kv_io_cmd(NvmeCtrl *n, NvmeCmd *cmd,
     NvmeRequest *req)
 {
+    if (!FTL_IS_OBJ_STRATEGY_NS(req->ns->nsid)) {
+        return NVME_INVALID_NSID;
+    };
+
     switch (cmd->opcode) {
     case NVME_KV_CMD_STORE:
         return nvme_ftl_store(n, cmd, req);

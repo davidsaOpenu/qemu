@@ -43,12 +43,13 @@
 
 #define VSSIM_BLOCK_OPT_SIMULATOR             ("simulator")
 
-static bool g_device_open = false;
+static uint32_t g_devices_open = 0;
 
 typedef struct BDRVVSSIMState {
     char * memory;
     uint64_t size;
     bool simulator;
+    uint32_t nsid;
 } BDRVVSSIMState;
 
 static QemuOptsList runtime_opts = {
@@ -65,6 +66,11 @@ static QemuOptsList runtime_opts = {
             .type = QEMU_OPT_BOOL,
             .help = "enable simulator"
         },
+        {
+            .name = "nsid",
+            .type = QEMU_OPT_NUMBER,
+            .help = "nsid"
+        },
         { /* end of list */ }
     },
 };
@@ -76,30 +82,29 @@ static int vssim_open(BlockDriverState *bs, QDict * dict, int flags,
     QemuOpts *opts = NULL;
     trace_vssim_open(bs);
 
-    // Only a single device is allowed due to global use of FTL
-    if (g_device_open) {
-        error_setg(errp, "vssim device allows only a single instance");
-        return -EINVAL;
-    }
-    g_device_open = true;
-
     // Prase the drive options
     opts = qemu_opts_create(&runtime_opts, NULL, 0, &error_abort);
     qemu_opts_absorb_qdict(opts, dict, &error_abort);
-    s->size = qemu_opt_get_size(opts, BLOCK_OPT_SIZE,
-                                VSSIM_DEFAULT_FILE_SIZE_IN_BYTES);
     s->simulator = qemu_opt_get_bool(opts, VSSIM_BLOCK_OPT_SIMULATOR, true);
+    s->nsid = qemu_opt_get_number(opts, "nsid", 0);
+
+    if (s->nsid == 0) {
+        s->size = qemu_opt_get_size(opts, BLOCK_OPT_SIZE, VSSIM_DEFAULT_FILE_SIZE_IN_BYTES);
+    } else {
+        s->size = FTL_GET_NAMESPACE_SIZE(s->nsid) * GET_PAGE_SIZE();
+        s->memory = qemu_blockalign0(bs, s->size);
+    }
+
     qemu_opts_del(opts);
 
-    // Allocate the memory
-    s->memory = qemu_blockalign0(bs, s->size);
-
-    // Initialize FTL and logger
-    if (s->simulator) {
+    if (g_devices_open == 0 && s->simulator) {
         FTL_INIT();
         INIT_LOG_MANAGER();
     }
 
+    g_devices_open++;
+
+    // Initialize FTL and logger
     trace_vssim_initialized(bs, s->size, s->memory);
 
     return 0;
@@ -110,8 +115,10 @@ static void vssim_close(BlockDriverState *bs)
     BDRVVSSIMState *s = bs->opaque;
     trace_vssim_close(bs);
 
+    g_devices_open--;
+
     // Destruct FTL
-    if (s->simulator) {
+    if (g_devices_open == 0 && s->simulator) {
         TERM_LOG_MANAGER();
         FTL_TERM();
     }
@@ -120,9 +127,6 @@ static void vssim_close(BlockDriverState *bs)
     if (NULL != s->memory) {
         qemu_vfree(s->memory);
     }
-
-    // Clear singleton state
-    g_device_open = false;
 }
 
 static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
@@ -136,7 +140,7 @@ static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        _FTL_READ_SECT(offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
+        _FTL_READ_SECT(s->nsid, offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
     }
 
     return 0;
@@ -153,7 +157,7 @@ static int coroutine_fn vssim_co_pwritev(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        _FTL_WRITE_SECT(offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
+        _FTL_WRITE_SECT(s->nsid, offset / GET_SECTOR_SIZE(), bytes/GET_SECTOR_SIZE(), NULL);
     }
 
     return 0;

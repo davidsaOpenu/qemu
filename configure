@@ -1997,6 +1997,8 @@ if test "$vssim" = "yes" ; then
     symlink "$vssim_source/SSD_MODULE/ssd_util.h" "$vssim_target/ssd_util.h"
     symlink "$vssim_source/SSD_MODULE/onfi.h" "$vssim_target/onfi.h"
     symlink "$vssim_source/SSD_MODULE/onfi.c" "$vssim_target/onfi.c"
+    symlink "$vssim_source/SSD_MODULE/test_context.h" "$vssim_target/test_context.h"
+    symlink "$vssim_source/SSD_MODULE/test_context.c" "$vssim_target/test_context.c"
     symlink "$vssim_source/FTL_SOURCE/COMMON/common.h" "$vssim_target/common.h"
     symlink "$vssim_source/FTL_SOURCE/COMMON/ssd_file_operations/ssd_file_operations.h" "$vssim_target/ssd_file_operations.h"
 	  symlink "$vssim_source/FTL_SOURCE/COMMON/ssd_file_operations/ssd_file_operations.c" "$vssim_target/ssd_file_operations.c"

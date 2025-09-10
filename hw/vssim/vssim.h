@@ -8,6 +8,7 @@ typedef struct BDRVVSSIMState {
     uint64_t size;
     bool simulator;
     uint8_t device_index;
+    uint32_t nsid;
 } BDRVVSSIMState;
 
 #endif /* VSSIM_H */

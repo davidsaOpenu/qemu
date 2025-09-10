@@ -10,6 +10,7 @@ typedef struct NvmeAsyncEvent {
 
 typedef struct NvmeRequest {
     struct NvmeSQueue       *sq;
+    struct NvmeNamespace    *ns;
     BlockAIOCB              *aiocb;
     uint16_t                status;
     bool                    has_sg;
@@ -67,7 +68,9 @@ typedef struct NvmeCQueue {
 } NvmeCQueue;
 
 typedef struct NvmeNamespace {
+    uint32_t        nsid;
     NvmeIdNs        id_ns;
+    BlockBackend    *blk;
 } NvmeNamespace;
 
 #define TYPE_NVME "nvme"
@@ -90,7 +93,6 @@ typedef struct NvmeCtrl {
     uint32_t    num_namespaces;
     uint32_t    num_queues;
     uint32_t    max_q_ents;
-    uint64_t    ns_size;
     uint32_t    cmb_size_mb;
     uint32_t    cmbsz;
     uint32_t    cmbloc;

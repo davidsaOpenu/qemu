@@ -47,6 +47,7 @@
 #define VSSIM_DEVICE_INDEX                    ("device_index")
 
 static bool g_configuration_read = false;
+static uint32_t g_open_namespace[UINT8_MAX] = {0, };
 
 static QemuOptsList runtime_opts = {
     .name = "vssim",
@@ -67,6 +68,11 @@ static QemuOptsList runtime_opts = {
             .type = QEMU_OPT_NUMBER,
             .help = "The index of the device in the configuration"
         },
+        {
+            .name = "nsid",
+            .type = QEMU_OPT_NUMBER,
+            .help = "nsid"
+        },
         { /* end of list */ }
     },
 };
@@ -86,21 +92,30 @@ static int vssim_open(BlockDriverState* bs, QDict* dict, int flags,
     // Prase the drive options
     opts = qemu_opts_create(&runtime_opts, NULL, 0, &error_abort);
     qemu_opts_absorb_qdict(opts, dict, &error_abort);
-    s->size = qemu_opt_get_size(opts, BLOCK_OPT_SIZE,
-                                VSSIM_DEFAULT_FILE_SIZE_IN_BYTES);
     s->simulator = qemu_opt_get_bool(opts, VSSIM_BLOCK_OPT_SIMULATOR, true);
     s->device_index = qemu_opt_get_number(opts, VSSIM_DEVICE_INDEX, 0);
+    s->nsid = qemu_opt_get_number(opts, "nsid", 0);
+
+    if (s->nsid == 0) {
+        s->size = qemu_opt_get_size(opts, BLOCK_OPT_SIZE, VSSIM_DEFAULT_FILE_SIZE_IN_BYTES);
+    } else {
+        s->size = FTL_GET_NAMESPACE_SIZE(s->device_index, s->nsid) * GET_PAGE_SIZE(s->device_index);
+    }
+
     qemu_opts_del(opts);
 
     // Allocate the memory
     s->memory = qemu_blockalign0(bs, s->size);
 
     // Initialize FTL and logger
-    if (s->simulator) {
+    if (g_open_namespace[s->device_index] == 0 && s->simulator) {
         FTL_INIT(s->device_index);
         INIT_LOG_MANAGER(s->device_index);
     }
 
+    g_open_namespace[s->device_index]++;
+
+    // Initialize FTL and logger
     trace_vssim_initialized(bs, s->size, s->memory);
 
     return 0;
@@ -111,8 +126,10 @@ static void vssim_close(BlockDriverState *bs)
     BDRVVSSIMState *s = bs->opaque;
     trace_vssim_close(bs);
 
+    g_open_namespace[s->device_index]--;
+
     // Destruct FTL
-    if (s->simulator) {
+    if (g_open_namespace[s->device_index] == 0 && s->simulator) {
         TERM_LOG_MANAGER(s->device_index);
         FTL_TERM(s->device_index);
     }
@@ -134,7 +151,7 @@ static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        FTL_READ_SECT(s->device_index, offset / GET_SECTOR_SIZE(s->device_index), bytes/GET_SECTOR_SIZE(s->device_index), NULL);
+        FTL_READ_SECT(s->device_index, s->nsid, offset / GET_SECTOR_SIZE(s->device_index), bytes/GET_SECTOR_SIZE(s->device_index), NULL);
     }
 
     return 0;
@@ -151,7 +168,7 @@ static int coroutine_fn vssim_co_pwritev(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        FTL_WRITE_SECT(s->device_index, offset / GET_SECTOR_SIZE(s->device_index), bytes/GET_SECTOR_SIZE(s->device_index), NULL);
+        FTL_WRITE_SECT(s->device_index, s->nsid, offset / GET_SECTOR_SIZE(s->device_index), bytes/GET_SECTOR_SIZE(s->device_index), NULL);
     }
 
     return 0;

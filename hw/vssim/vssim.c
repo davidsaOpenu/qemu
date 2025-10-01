@@ -33,7 +33,7 @@
  #include "block/block_int.h"
  #include "trace.h"
  #include "vssim.h"
- 
+
  #include "simulator/vssim_config_manager.h"
  #include "simulator/ftl_sect_strategy.h"
 
@@ -134,7 +134,7 @@ static int coroutine_fn vssim_co_preadv(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        _FTL_READ_SECT(s->device_index, offset / GET_SECTOR_SIZE(s->device_index), bytes/GET_SECTOR_SIZE(s->device_index), NULL);
+        FTL_READ_SECT(s->device_index, offset / GET_SECTOR_SIZE(s->device_index), bytes/GET_SECTOR_SIZE(s->device_index), NULL);
     }
 
     return 0;
@@ -151,7 +151,7 @@ static int coroutine_fn vssim_co_pwritev(BlockDriverState *bs, uint64_t offset,
 
     // Pass write to simulator
     if (s->simulator) {
-        _FTL_WRITE_SECT(s->device_index, offset / GET_SECTOR_SIZE(s->device_index), bytes/GET_SECTOR_SIZE(s->device_index), NULL);
+        FTL_WRITE_SECT(s->device_index, offset / GET_SECTOR_SIZE(s->device_index), bytes/GET_SECTOR_SIZE(s->device_index), NULL);
     }
 
     return 0;

@@ -600,7 +600,7 @@ static uint16_t nvme_ftl_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
             return NVME_FTL_API_FAILED;
         }
 
-        ftl_ret = _FTL_OBJ_CREATE(device_index, object, value_size);
+        ftl_ret = FTL_OBJ_CREATE(device_index, object, value_size);
         if (ftl_ret != FTL_SUCCESS) {
             if (value_size > 0) g_free(data);
             printf("Failed to create object\n");
@@ -616,7 +616,7 @@ static uint16_t nvme_ftl_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
             return NVME_FTL_API_FAILED;
         }
 
-        ftl_ret = _FTL_OBJ_WRITE(device_index, object, data, 0 /* offest */, value_size);
+        ftl_ret = FTL_OBJ_WRITE(device_index, object, data, 0 /* offest */, value_size);
         g_free(data);
         if (ftl_ret != FTL_SUCCESS) {
             printf("Failed to write object using FTP API.\n");
@@ -672,7 +672,7 @@ static uint16_t nvme_ftl_retreive(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         return NVME_FTL_API_FAILED;
     }
 
-    ftl_ret_val ftl_ret = _FTL_OBJ_READ(device_index, object, data, 0 /* offest */, &read_size);
+    ftl_ret_val ftl_ret = FTL_OBJ_READ(device_index, object, data, 0 /* offest */, &read_size);
     if (ftl_ret != FTL_SUCCESS) {
         g_free(data);
         printf("Failed to read object using FTP API.\n");
@@ -719,8 +719,8 @@ static uint16_t nvme_ftl_delete(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         printf("Failed to get device index\n");
         return NVME_FTL_API_FAILED;
     }
-    
-    _FTL_OBJ_DELETE(device_index, object);
+
+    FTL_OBJ_DELETE(device_index, object);
 
     return NVME_SUCCESS;
 }
@@ -743,7 +743,7 @@ static uint16_t nvme_ftl_list(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 
     uint8_t buffer[OSD_LIST_BUFFER_SIZE] = {0x0};
     size_t size = sizeof(buffer);
-    ftl_ret_val ftl_ret = _FTL_OBJ_LIST(buffer, &size, minimum_obj_id);
+    ftl_ret_val ftl_ret = FTL_OBJ_LIST(buffer, &size, minimum_obj_id);
     if (ftl_ret != FTL_SUCCESS) {
         printf("Failed to list objects using FTP API.\n");
         return NVME_FTL_API_FAILED;
@@ -810,7 +810,7 @@ static uint16_t nvme_ftl_exist(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         req->cqe.result = NVME_KEY_DOES_NOT_EXIST;
     else
         req->cqe.result = 0;
-  
+
     return NVME_SUCCESS;
 }
 
@@ -869,7 +869,7 @@ static uint16_t nvme_del_sq(NvmeCtrl *n, NvmeCmd *cmd)
     NvmeSQueue *sq;
     NvmeCQueue *cq;
     uint16_t qid = le16_to_cpu(c->qid);
-    
+
     if (unlikely(!qid || !nvme_used_sqid(n, qid))) {
         trace_nvme_err_invalid_del_sq(qid);
         return NVME_INVALID_QID | NVME_DNR;

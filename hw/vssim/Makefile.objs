@@ -2,7 +2,7 @@ common-obj-$(CONFIG_VSSIM) += vssim.o
 # common-obj-$(CONFIG_VSSIM) += ftl_obj_stub.o
 
 common-obj-$(CONFIG_VSSIM) += simulator/vssim_config_manager.o
-common-obj-$(CONFIG_VSSIM) += simulator/ftl.o simulator/ftl_mapping_manager.o simulator/ftl_inverse_mapping_manager.o
+common-obj-$(CONFIG_VSSIM) += simulator/ftl.o  simulator/onfi.o simulator/ftl_mapping_manager.o simulator/ftl_inverse_mapping_manager.o
 common-obj-$(CONFIG_VSSIM) += simulator/ssd_file_operations.o
 common-obj-$(CONFIG_VSSIM) += simulator/ftl_sect_strategy.o
 common-obj-$(CONFIG_VSSIM) += simulator/ftl_obj_strategy.o

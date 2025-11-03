@@ -558,6 +558,12 @@ static uint16_t nvme_ftl_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 {
     NvmeKvCmd *kv_cmd = (NvmeKvCmd *)cmd;
     uint16_t status;
+    uint8_t device_index = get_device_index(n);
+    if (INVALID_DEVICE_INDEX == device_index)
+    {
+        printf("Failed to get device index\n");
+        return NVME_FTL_API_FAILED;
+    }
 
     if (kv_cmd->key_low > UINT64_MAX - USEROBJECT_OID_LB) {
         printf("Overflow detected while calculating the object id!\n");
@@ -592,14 +598,7 @@ static uint16_t nvme_ftl_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     };
 
     ftl_ret_val ftl_ret = 0;
-    if (!lookup_object(object.object_id)) {
-        uint8_t device_index = get_device_index(n);
-        if (INVALID_DEVICE_INDEX == device_index)
-        {
-            printf("Failed to get device index\n");
-            return NVME_FTL_API_FAILED;
-        }
-
+    if (!lookup_object(device_index, object.object_id)) {
         ftl_ret = FTL_OBJ_CREATE(device_index, object, value_size);
         if (ftl_ret != FTL_SUCCESS) {
             if (value_size > 0) g_free(data);
@@ -609,13 +608,6 @@ static uint16_t nvme_ftl_store(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     }
 
     if (value_size > 0) {
-        uint8_t device_index = get_device_index(n);
-        if (INVALID_DEVICE_INDEX == device_index)
-        {
-            printf("Failed to get device index\n");
-            return NVME_FTL_API_FAILED;
-        }
-
         ftl_ret = FTL_OBJ_WRITE(device_index, object, data, 0 /* offest */, value_size);
         g_free(data);
         if (ftl_ret != FTL_SUCCESS) {
@@ -632,6 +624,12 @@ static uint16_t nvme_ftl_retreive(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 {
     NvmeKvCmd *kv_cmd = (NvmeKvCmd *)cmd;
     uint16_t status;
+    uint8_t device_index = get_device_index(n);
+    if (INVALID_DEVICE_INDEX == device_index)
+    {
+        printf("Failed to get device index\n");
+        return NVME_FTL_API_FAILED;
+    }
 
     // Retreive the value using the FTL API and OSD target API
 
@@ -648,7 +646,7 @@ static uint16_t nvme_ftl_retreive(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         .partition_id = PARTITION_PID_LB
     };
 
-    stored_object *found_object = lookup_object(object.object_id);
+    stored_object *found_object = lookup_object(device_index, object.object_id);
     if (!found_object) {
         printf("failed to find object using FTL call.\n");
         return NVME_FTL_API_FAILED;
@@ -663,13 +661,6 @@ static uint16_t nvme_ftl_retreive(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     if (!data) {
         printf("Allocation failed.\n");
         return NVME_SYSTEM_ERROR;
-    }
-
-    uint8_t device_index = get_device_index(n);
-    if (INVALID_DEVICE_INDEX == device_index)
-    {
-        printf("Failed to get device index\n");
-        return NVME_FTL_API_FAILED;
     }
 
     ftl_ret_val ftl_ret = FTL_OBJ_READ(device_index, object, data, 0 /* offest */, &read_size);
@@ -729,6 +720,12 @@ static uint16_t nvme_ftl_list(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     NvmeRequest *req)
 {
     NvmeKvCmd *kv_cmd = (NvmeKvCmd *)cmd;
+    uint8_t device_index = get_device_index(n);
+    if (INVALID_DEVICE_INDEX == device_index)
+    {
+        printf("Failed to get device index\n");
+        return NVME_FTL_API_FAILED;
+    }
 
     // First, calculate the required buffer size
     if (kv_cmd->value_size < sizeof(uint32_t)) {
@@ -743,7 +740,7 @@ static uint16_t nvme_ftl_list(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 
     uint8_t buffer[OSD_LIST_BUFFER_SIZE] = {0x0};
     size_t size = sizeof(buffer);
-    ftl_ret_val ftl_ret = FTL_OBJ_LIST(buffer, &size, minimum_obj_id);
+    ftl_ret_val ftl_ret = FTL_OBJ_LIST(device_index, buffer, &size, minimum_obj_id);
     if (ftl_ret != FTL_SUCCESS) {
         printf("Failed to list objects using FTP API.\n");
         return NVME_FTL_API_FAILED;
@@ -792,6 +789,12 @@ static uint16_t nvme_ftl_exist(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     NvmeRequest *req)
 {
     NvmeKvCmd *kv_cmd = (NvmeKvCmd *)cmd;
+    uint8_t device_index = get_device_index(n);
+    if (INVALID_DEVICE_INDEX == device_index)
+    {
+        printf("Failed to get device index\n");
+        return NVME_FTL_API_FAILED;
+    }
 
     if (kv_cmd->key_low > UINT64_MAX - USEROBJECT_OID_LB) {
         printf("Overflow detected while calculating the object id!\n");
@@ -806,7 +809,7 @@ static uint16_t nvme_ftl_exist(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         .partition_id = PARTITION_PID_LB
     };
 
-    if (!lookup_object(object.object_id))
+    if (!lookup_object(device_index, object.object_id))
         req->cqe.result = NVME_KEY_DOES_NOT_EXIST;
     else
         req->cqe.result = 0;
@@ -2085,19 +2088,21 @@ static void nvme_class_init(ObjectClass *oc, void *data)
 static void nvme_instance_init(Object *obj)
 {
     NvmeCtrl *s = NVME(obj);
+    uint8_t device_index = get_device_index(s);
 
     device_add_bootindex_property(obj, &s->conf.bootindex,
                                   "bootindex", "/namespace@1,0",
                                   DEVICE(obj), &error_abort);
 
-    INIT_OBJ_STRATEGY();
+    INIT_OBJ_STRATEGY(device_index);
 }
 
 static void nvme_class_finalize(ObjectClass *obj, void *data)
 {
-    // NvmeCtrl *s = NVME(obj); // Might be used later
+    NvmeCtrl *s = NVME(obj);
+    uint8_t device_index = get_device_index(s);
 
-    TERM_OBJ_STRATEGY();
+    TERM_OBJ_STRATEGY(device_index);
 }
 
 static uint8_t get_device_index(NvmeCtrl* ctrl)

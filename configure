@@ -1992,6 +1992,8 @@ if test "$vssim" = "yes" ; then
     make -C "$vssim_target/osc-osd/osd-target" osd-schema.c
     symlink "$vssim_source/SSD_MODULE/ssd_io_manager.h" "$vssim_target/ssd_io_manager.h"
     symlink "$vssim_source/SSD_MODULE/ssd_io_manager.c" "$vssim_target/ssd_io_manager.c"
+    symlink "$vssim_source/SSD_MODULE/test_context.h" "$vssim_target/test_context.h"
+    symlink "$vssim_source/SSD_MODULE/test_context.c" "$vssim_target/test_context.c"
     symlink "$vssim_source/SSD_MODULE/ssd_log_manager.h" "$vssim_target/ssd_log_manager.h"
     symlink "$vssim_source/SSD_MODULE/ssd_log_manager.c" "$vssim_target/ssd_log_manager.c"
     symlink "$vssim_source/SSD_MODULE/ssd_util.h" "$vssim_target/ssd_util.h"
